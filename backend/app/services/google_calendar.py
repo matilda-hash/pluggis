@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session
 from ..models import OAuthToken
 
 SCOPES = [
-    "https://www.googleapis.com/auth/calendar.readonly",
-    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar",          # full access: read + write + manage calendars
+    "https://www.googleapis.com/auth/calendar.events",   # kept for backwards compat with old tokens
 ]
 
 # Keywords for classifying calendar events (Swedish + English)
@@ -34,6 +34,17 @@ class GoogleCalendarService:
     def is_authenticated(self) -> bool:
         token = self._load_token()
         return token is not None and bool(token.access_token)
+
+    def needs_reauth(self) -> bool:
+        """True if the stored token is missing the full 'calendar' scope (can't create calendars)."""
+        token = self._load_token()
+        if not token:
+            return False
+        scopes = token.scopes or []
+        return not any(
+            isinstance(s, str) and "googleapis.com/auth/calendar" in s and "readonly" not in s and "events" not in s
+            for s in scopes
+        )
 
     def get_email(self) -> Optional[str]:
         """Return the authenticated user's email if available."""
@@ -112,13 +123,15 @@ class GoogleCalendarService:
         return True
 
     def get_events(self, date_from: datetime, date_to: datetime) -> List[dict]:
-        """Fetch events from Google Calendar in the given date range."""
+        """Fetch events only from the 'primary' (main) calendar.
+        Pluggis writes to its own separate calendar and never reads it back."""
         creds = self._build_credentials()
         if not creds:
             return []
         try:
             from googleapiclient.discovery import build
             service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+
             result = (
                 service.events()
                 .list(
@@ -131,15 +144,21 @@ class GoogleCalendarService:
                 )
                 .execute()
             )
-            return result.get("items", [])
+            events = []
+            for event in result.get("items", []):
+                event["_cal_name"] = "main"
+                events.append(event)
+            return events
         except Exception:
             return []
 
     def classify_event(self, event: dict) -> str:
-        """Classify a Google Calendar event into a study-relevant type."""
+        """Classify a Google Calendar event into a study-relevant type.
+        Uses event title, description, AND source calendar name."""
         title = event.get("summary", "").lower()
         description = event.get("description", "").lower()
-        combined = f"{title} {description}"
+        cal_name = event.get("_cal_name", "").lower()
+        combined = f"{title} {description} {cal_name}"
 
         for kw in _VFU_KEYWORDS:
             if kw in combined:
@@ -167,6 +186,55 @@ class GoogleCalendarService:
             return True
         return False
 
+    def get_or_create_pluggis_calendar(self) -> str:
+        """Find or create the 'Pluggis' calendar. Returns its calendar ID.
+        The ID is cached in the token scopes to avoid repeated API calls."""
+        # Check cache first
+        token = self._load_token()
+        if token:
+            for item in (token.scopes or []):
+                if isinstance(item, str) and item.startswith("pluggis_cal_id:"):
+                    return item[15:]
+
+        creds = self._build_credentials()
+        if not creds:
+            return "primary"
+        try:
+            from googleapiclient.discovery import build
+            service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+
+            # Look for existing Pluggis calendar
+            cal_list = service.calendarList().list().execute()
+            for cal in cal_list.get("items", []):
+                if cal.get("summary", "").lower() == "pluggis":
+                    cal_id = cal["id"]
+                    self._cache_pluggis_cal_id(cal_id)
+                    return cal_id
+
+            # Create it (requires full 'calendar' scope)
+            new_cal = service.calendars().insert(body={
+                "summary": "Pluggis",
+                "description": "Studieblock genererade av Pluggis-appen",
+                "timeZone": "Europe/Stockholm",
+            }).execute()
+            cal_id = new_cal["id"]
+            self._cache_pluggis_cal_id(cal_id)
+            return cal_id
+        except Exception:
+            return "primary"
+
+    def _cache_pluggis_cal_id(self, cal_id: str) -> None:
+        """Store the Pluggis calendar ID in the token scopes JSON for reuse."""
+        token = self._load_token()
+        if not token:
+            return
+        scopes = list(token.scopes or [])
+        # Remove any old cached ID
+        scopes = [s for s in scopes if not (isinstance(s, str) and s.startswith("pluggis_cal_id:"))]
+        scopes.append(f"pluggis_cal_id:{cal_id}")
+        token.scopes = scopes
+        self.db.commit()
+
     def create_event(
         self,
         title: str,
@@ -174,38 +242,86 @@ class GoogleCalendarService:
         end: datetime,
         description: str = "",
         color_id: Optional[str] = None,
+        calendar_id: Optional[str] = None,
     ) -> Optional[str]:
         """Create a Google Calendar event. Returns the event ID or None on failure."""
         creds = self._build_credentials()
         if not creds:
             return None
+        if calendar_id is None:
+            calendar_id = self.get_or_create_pluggis_calendar()
         try:
             from googleapiclient.discovery import build
             service = build("calendar", "v3", credentials=creds, cache_discovery=False)
             body = {
                 "summary": title,
                 "description": description,
-                "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
-                "end": {"dateTime": end.isoformat(), "timeZone": "UTC"},
+                "start": {"dateTime": start.isoformat(), "timeZone": "Europe/Stockholm"},
+                "end": {"dateTime": end.isoformat(), "timeZone": "Europe/Stockholm"},
             }
             if color_id:
                 body["colorId"] = color_id
-            event = service.events().insert(calendarId="primary", body=body).execute()
+            event = service.events().insert(calendarId=calendar_id, body=body).execute()
             return event.get("id")
         except Exception:
+            # Fall back to primary if target calendar failed
+            if calendar_id != "primary":
+                try:
+                    from googleapiclient.discovery import build
+                    service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+                    event = service.events().insert(calendarId="primary", body=body).execute()
+                    return event.get("id")
+                except Exception:
+                    pass
             return None
+
+    def update_event(
+        self,
+        google_event_id: str,
+        title: str,
+        start: datetime,
+        end: datetime,
+        description: str = "",
+    ) -> bool:
+        """Update an existing Google Calendar event. Returns True on success."""
+        creds = self._build_credentials()
+        if not creds:
+            return False
+        cal_id = self.get_or_create_pluggis_calendar()
+        try:
+            from googleapiclient.discovery import build
+            service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+            body = {
+                "summary": title,
+                "description": description,
+                "start": {"dateTime": start.isoformat(), "timeZone": "Europe/Stockholm"},
+                "end": {"dateTime": end.isoformat(), "timeZone": "Europe/Stockholm"},
+            }
+            service.events().update(calendarId=cal_id, eventId=google_event_id, body=body).execute()
+            return True
+        except Exception:
+            try:
+                service.events().update(calendarId="primary", eventId=google_event_id, body=body).execute()
+                return True
+            except Exception:
+                return False
 
     def delete_event(self, google_event_id: str) -> bool:
         creds = self._build_credentials()
         if not creds:
             return False
+        cal_id = self.get_or_create_pluggis_calendar()
         try:
             from googleapiclient.discovery import build
             service = build("calendar", "v3", credentials=creds, cache_discovery=False)
-            service.events().delete(calendarId="primary", eventId=google_event_id).execute()
+            service.events().delete(calendarId=cal_id, eventId=google_event_id).execute()
             return True
         except Exception:
-            return False
+            try:
+                service.events().delete(calendarId="primary", eventId=google_event_id).execute()
+                return True
+            except Exception:
+                return False
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
@@ -269,6 +385,18 @@ class GoogleCalendarService:
             f"client_id:{client_id}",
             f"client_secret:{client_secret}",
         ]
+
+        # Fetch user email via primary calendar ID (no extra OAuth scope needed)
+        try:
+            from googleapiclient.discovery import build
+            svc = build("calendar", "v3", credentials=creds, cache_discovery=False)
+            primary = svc.calendars().get(calendarId="primary").execute()
+            email = primary.get("id", "")
+            if email and "@" in email:
+                scopes_data.append(f"email:{email}")
+        except Exception:
+            pass
+
         expiry = creds.expiry.replace(tzinfo=None) if creds.expiry else None
         if token:
             token.access_token = creds.token or ""

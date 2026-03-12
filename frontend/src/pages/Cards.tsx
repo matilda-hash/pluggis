@@ -51,6 +51,7 @@ export default function Cards() {
   }, [deckId])
 
   const handleDelete = async (cardId: number) => {
+    if (!confirm('Ta bort det här kortet?')) return
     await cardsApi.delete(cardId)
     setCards(prev => prev.filter(c => c.id !== cardId))
   }
@@ -81,7 +82,7 @@ export default function Cards() {
   }
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Loading...</div>
+    return <div className="flex items-center justify-center h-64 text-gray-400 text-sm">Laddar...</div>
   }
 
   return (
@@ -201,8 +202,8 @@ export default function Cards() {
                       </>
                     )}
                     <div className="flex gap-2">
-                      <button onClick={handleSaveEdit} className="text-xs btn-primary px-3 py-1.5 flex items-center gap-1"><Check size={12} /> Save</button>
-                      <button onClick={() => setEdit(null)} className="text-xs btn-secondary px-3 py-1.5 flex items-center gap-1"><X size={12} /> Cancel</button>
+                      <button onClick={handleSaveEdit} className="text-xs btn-primary px-3 py-1.5 flex items-center gap-1"><Check size={12} /> Spara</button>
+                      <button onClick={() => setEdit(null)} className="text-xs btn-secondary px-3 py-1.5 flex items-center gap-1"><X size={12} /> Avbryt</button>
                     </div>
                   </div>
                 ) : (

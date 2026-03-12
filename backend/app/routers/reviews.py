@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ..database import get_db, DEFAULT_USER_ID
-from ..models import Card, CardState, Review, StudySession
+from ..auth import get_current_user
+from ..database import get_db
+from ..models import Card, CardState, Deck, Review, StudySession, User
 from ..schemas import ReviewSubmit, SessionStart, SessionOut
 from ..services.fsrs import FSRS, FSRSCard, Rating, State
 
@@ -20,34 +21,33 @@ def get_study_queue(
     deck_id: Optional[int] = Query(None),
     limit: int = Query(50),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """
-    Return cards that are due for review.
-    New cards (no state) and cards past their due date are included.
-    Order: Learning > due Review > New.
-    """
     now = datetime.utcnow()
 
-    # Cards that are due: either past their due date, OR new (due is NULL / state is New)
     due_query = (
         db.query(Card)
         .join(CardState)
         .filter(
             Card.is_suspended == False,
-            CardState.user_id == DEFAULT_USER_ID,
+            CardState.user_id == current_user.id,
             or_(
                 CardState.due <= now,
-                CardState.due == None,          # new cards saved via upload (state=New, due not set yet)
-                CardState.state == int(State.New),  # belt-and-suspenders
+                CardState.due == None,
+                CardState.state == int(State.New),
             ),
         )
     )
 
-    # Cards with no CardState row at all (manually created without state)
-    state_ids = db.query(CardState.card_id)
-    new_query = db.query(Card).filter(
-        Card.is_suspended == False,
-        ~Card.id.in_(state_ids),
+    state_ids = db.query(CardState.card_id).filter(CardState.user_id == current_user.id)
+    new_query = (
+        db.query(Card)
+        .join(Deck, Card.deck_id == Deck.id)
+        .filter(
+            Deck.user_id == current_user.id,
+            Card.is_suspended == False,
+            ~Card.id.in_(state_ids),
+        )
     )
 
     if deck_id:
@@ -57,7 +57,6 @@ def get_study_queue(
     due_cards = due_query.order_by(CardState.state.asc(), CardState.due.asc()).all()
     new_cards = new_query.limit(20).all()
 
-    # Combine, deduplicate, enforce limit
     seen = set()
     combined = []
     for card in due_cards + new_cards:
@@ -67,7 +66,6 @@ def get_study_queue(
         if len(combined) >= limit:
             break
 
-    # Serialize
     result = []
     for card in combined:
         cs = card.state
@@ -95,9 +93,17 @@ def get_study_queue(
 
 
 @router.post("/review")
-def submit_review(data: ReviewSubmit, db: Session = Depends(get_db)):
-    """Submit a rating for a card and update its FSRS schedule."""
-    card = db.query(Card).filter(Card.id == data.card_id).first()
+def submit_review(
+    data: ReviewSubmit,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    card = (
+        db.query(Card)
+        .join(Deck, Card.deck_id == Deck.id)
+        .filter(Card.id == data.card_id, Deck.user_id == current_user.id)
+        .first()
+    )
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
 
@@ -106,7 +112,6 @@ def submit_review(data: ReviewSubmit, db: Session = Depends(get_db)):
 
     card_state = db.query(CardState).filter(CardState.card_id == card.id).first()
 
-    # Build FSRS card from DB state
     fsrs_card = FSRSCard(
         stability=card_state.stability if card_state else 0.0,
         difficulty=card_state.difficulty if card_state else 0.0,
@@ -119,9 +124,8 @@ def submit_review(data: ReviewSubmit, db: Session = Depends(get_db)):
 
     result = fsrs.schedule(fsrs_card, Rating(data.rating))
 
-    # Upsert card state
     if not card_state:
-        card_state = CardState(card_id=card.id, user_id=DEFAULT_USER_ID)
+        card_state = CardState(card_id=card.id, user_id=current_user.id)
         db.add(card_state)
 
     card_state.stability = result.card.stability
@@ -132,10 +136,9 @@ def submit_review(data: ReviewSubmit, db: Session = Depends(get_db)):
     card_state.lapses = result.card.lapses
     card_state.state = int(result.card.state)
 
-    # Persist review log
     review = Review(
         card_id=card.id,
-        user_id=DEFAULT_USER_ID,
+        user_id=current_user.id,
         rating=data.rating,
         state_before=result.review_log["state_before"],
         stability_before=result.review_log["stability_before"],
@@ -147,9 +150,11 @@ def submit_review(data: ReviewSubmit, db: Session = Depends(get_db)):
     )
     db.add(review)
 
-    # Update session counters
     if data.session_id:
-        session = db.query(StudySession).filter(StudySession.id == data.session_id).first()
+        session = db.query(StudySession).filter(
+            StudySession.id == data.session_id,
+            StudySession.user_id == current_user.id,
+        ).first()
         if session:
             session.cards_studied += 1
             if data.rating == 1:
@@ -173,8 +178,12 @@ def submit_review(data: ReviewSubmit, db: Session = Depends(get_db)):
 
 
 @router.post("/session/start", response_model=SessionOut)
-def start_session(data: SessionStart, db: Session = Depends(get_db)):
-    session = StudySession(user_id=DEFAULT_USER_ID, deck_id=data.deck_id)
+def start_session(
+    data: SessionStart,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    session = StudySession(user_id=current_user.id, deck_id=data.deck_id)
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -182,8 +191,15 @@ def start_session(data: SessionStart, db: Session = Depends(get_db)):
 
 
 @router.post("/session/end", response_model=SessionOut)
-def end_session(session_id: int, db: Session = Depends(get_db)):
-    session = db.query(StudySession).filter(StudySession.id == session_id).first()
+def end_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    session = db.query(StudySession).filter(
+        StudySession.id == session_id,
+        StudySession.user_id == current_user.id,
+    ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     session.ended_at = datetime.utcnow()

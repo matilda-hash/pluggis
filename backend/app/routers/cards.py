@@ -4,8 +4,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..database import get_db, DEFAULT_USER_ID
-from ..models import Card, CardState, Deck
+from ..auth import get_current_user
+from ..database import get_db
+from ..models import Card, CardState, Deck, User
 from ..schemas import CardCreate, CardUpdate, CardOut
 from ..services.fsrs import State
 
@@ -18,7 +19,11 @@ def list_cards(
     state: Optional[int] = None,
     suspended: bool = False,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == current_user.id).first()
+    if not deck:
+        raise HTTPException(status_code=404, detail="Deck not found")
     q = db.query(Card).filter(Card.deck_id == deck_id)
     if not suspended:
         q = q.filter(Card.is_suspended == False)
@@ -28,9 +33,12 @@ def list_cards(
 
 
 @router.post("/", response_model=CardOut)
-def create_card(data: CardCreate, db: Session = Depends(get_db)):
-    # Verify deck belongs to user
-    deck = db.query(Deck).filter(Deck.id == data.deck_id, Deck.user_id == DEFAULT_USER_ID).first()
+def create_card(
+    data: CardCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    deck = db.query(Deck).filter(Deck.id == data.deck_id, Deck.user_id == current_user.id).first()
     if not deck:
         raise HTTPException(status_code=404, detail="Deck not found")
 
@@ -38,8 +46,7 @@ def create_card(data: CardCreate, db: Session = Depends(get_db)):
     db.add(card)
     db.flush()
 
-    # Create initial FSRS state (New, due=None → immediately available in queue)
-    state = CardState(card_id=card.id, user_id=DEFAULT_USER_ID, state=0)
+    state = CardState(card_id=card.id, user_id=current_user.id, state=0)
     db.add(state)
     db.commit()
     db.refresh(card)
@@ -47,8 +54,13 @@ def create_card(data: CardCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/bulk", response_model=List[CardOut])
-def create_cards_bulk(deck_id: int, cards_data: List[CardCreate], db: Session = Depends(get_db)):
-    deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == DEFAULT_USER_ID).first()
+def create_cards_bulk(
+    deck_id: int,
+    cards_data: List[CardCreate],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == current_user.id).first()
     if not deck:
         raise HTTPException(status_code=404, detail="Deck not found")
 
@@ -57,7 +69,7 @@ def create_cards_bulk(deck_id: int, cards_data: List[CardCreate], db: Session = 
         card = Card(**data.model_dump())
         db.add(card)
         db.flush()
-        state = CardState(card_id=card.id, user_id=DEFAULT_USER_ID, state=0)
+        state = CardState(card_id=card.id, user_id=current_user.id, state=0)
         db.add(state)
         created.append(card)
 
@@ -68,16 +80,29 @@ def create_cards_bulk(deck_id: int, cards_data: List[CardCreate], db: Session = 
 
 
 @router.get("/{card_id}", response_model=CardOut)
-def get_card(card_id: int, db: Session = Depends(get_db)):
-    card = db.query(Card).filter(Card.id == card_id).first()
+def get_card(
+    card_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    card = db.query(Card).join(Deck, Card.deck_id == Deck.id).filter(
+        Card.id == card_id, Deck.user_id == current_user.id
+    ).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
     return card
 
 
 @router.put("/{card_id}", response_model=CardOut)
-def update_card(card_id: int, data: CardUpdate, db: Session = Depends(get_db)):
-    card = db.query(Card).filter(Card.id == card_id).first()
+def update_card(
+    card_id: int,
+    data: CardUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    card = db.query(Card).join(Deck, Card.deck_id == Deck.id).filter(
+        Card.id == card_id, Deck.user_id == current_user.id
+    ).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
     for field, value in data.model_dump(exclude_none=True).items():
@@ -89,8 +114,14 @@ def update_card(card_id: int, data: CardUpdate, db: Session = Depends(get_db)):
 
 
 @router.delete("/{card_id}")
-def delete_card(card_id: int, db: Session = Depends(get_db)):
-    card = db.query(Card).filter(Card.id == card_id).first()
+def delete_card(
+    card_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    card = db.query(Card).join(Deck, Card.deck_id == Deck.id).filter(
+        Card.id == card_id, Deck.user_id == current_user.id
+    ).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
     db.delete(card)

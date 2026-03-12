@@ -97,9 +97,11 @@ class PreLectureGenerator:
 
         # Fallback: internal FSRS — find due/new cards in decks matching subject
         from datetime import datetime
-        from ..database import DEFAULT_USER_ID
 
-        query = db.query(CardState).filter(CardState.user_id == DEFAULT_USER_ID)
+        user_id = getattr(lecture, "user_id", None)
+        query = db.query(CardState)
+        if user_id:
+            query = query.filter(CardState.user_id == user_id)
         if subject_tag:
             # Filter cards whose tags contain the subject_tag
             from ..models import Card as CardModel

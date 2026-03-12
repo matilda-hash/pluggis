@@ -6,6 +6,7 @@ import {
   MapPin, Star, Trash2, Pencil, X, Check, Briefcase, List,
   CalendarDays, Upload, CheckCircle,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type {
   BlockPlan, StudyBlock, Lecture, LectureCreate,
   AnkiStatus, BlockStatus, CalendarEvent, CalendarStatus,
@@ -16,19 +17,27 @@ import { scheduleApi, ankiApi, calendarApi } from '../services/api'
 const DAY_START = 8
 const DAY_END = 17
 const HOURS = Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i)
-const TOTAL_MINUTES = (DAY_END - DAY_START) * 60
 const WEEK_HOUR_PX = 64   // px per hour in week timeline
 const FIVE_HOUR_PX = 22   // px per hour in 5-week mini timeline
 
 // ── Styling ───────────────────────────────────────────────────────────────────
 const BLOCK_CFG: Record<string, {
-  label: string; gradient: string; light: string; border: string; icon: React.FC<{ size?: number }>
+  label: string; gradient: string; light: string; border: string; icon: LucideIcon
 }> = {
-  pre_lecture:      { label: 'Förberedelse',  gradient: 'from-blue-500 to-indigo-600',   light: 'bg-blue-50 text-blue-800',    border: 'border-l-blue-500',    icon: BookOpen },
-  post_lecture:     { label: 'Genomgång',     gradient: 'from-purple-500 to-violet-600', light: 'bg-purple-50 text-purple-800', border: 'border-l-purple-500',  icon: FileText },
-  daily_repetition: { label: 'Repetition',    gradient: 'from-emerald-500 to-green-600', light: 'bg-emerald-50 text-emerald-800', border: 'border-l-emerald-500', icon: RotateCcw },
-  reading:          { label: 'Läsning',       gradient: 'from-amber-400 to-orange-500',  light: 'bg-amber-50 text-amber-800',   border: 'border-l-amber-500',   icon: BookOpen },
-  activation:       { label: 'Aktivering',    gradient: 'from-orange-400 to-rose-500',   light: 'bg-orange-50 text-orange-800', border: 'border-l-orange-500',  icon: Zap },
+  pre_lecture:      { label: 'Förberedelse',       gradient: 'from-blue-500 to-indigo-600',    light: 'bg-blue-50 text-blue-800',       border: 'border-l-blue-500',    icon: BookOpen },
+  post_lecture:     { label: 'Genomgång',          gradient: 'from-purple-500 to-violet-600',  light: 'bg-purple-50 text-purple-800',   border: 'border-l-purple-500',  icon: FileText },
+  daily_repetition: { label: 'Repetition',         gradient: 'from-emerald-500 to-green-600',  light: 'bg-emerald-50 text-emerald-800', border: 'border-l-emerald-500', icon: RotateCcw },
+  reading:          { label: 'Läsning',            gradient: 'from-amber-400 to-orange-500',   light: 'bg-amber-50 text-amber-800',     border: 'border-l-amber-500',   icon: BookOpen },
+  activation:       { label: 'Aktivering',         gradient: 'from-orange-400 to-rose-500',    light: 'bg-orange-50 text-orange-800',   border: 'border-l-orange-500',  icon: Zap },
+  practice_test:    { label: 'Övningsprov',        gradient: 'from-rose-500 to-pink-600',      light: 'bg-rose-50 text-rose-800',       border: 'border-l-rose-500',    icon: FileText },
+  timed_drill:      { label: 'Tidsbegränsad drill',gradient: 'from-sky-500 to-blue-600',       light: 'bg-sky-50 text-sky-800',         border: 'border-l-sky-500',     icon: Zap },
+  mistake_review:   { label: 'Felgenomgång',       gradient: 'from-red-400 to-rose-500',       light: 'bg-red-50 text-red-800',         border: 'border-l-red-400',     icon: AlertCircle },
+  active_recall:    { label: 'Aktiv återkallning', gradient: 'from-violet-500 to-purple-600',  light: 'bg-violet-50 text-violet-800',   border: 'border-l-violet-500',  icon: Star },
+  case_study:       { label: 'Fallstudie',         gradient: 'from-teal-500 to-emerald-600',   light: 'bg-teal-50 text-teal-800',       border: 'border-l-teal-500',    icon: FileText },
+  resource:         { label: 'Studiematerial',     gradient: 'from-indigo-400 to-blue-500',    light: 'bg-indigo-50 text-indigo-800',   border: 'border-l-indigo-400',  icon: BookOpen },
+  lunch:            { label: 'Lunch',              gradient: 'from-yellow-400 to-amber-500',   light: 'bg-yellow-50 text-yellow-800',   border: 'border-l-yellow-400',  icon: Clock },
+  break:            { label: 'Paus',               gradient: 'from-gray-300 to-gray-400',      light: 'bg-gray-50 text-gray-500',       border: 'border-l-gray-300',    icon: Clock },
+  gym:              { label: 'Gym/Träning',        gradient: 'from-rose-400 to-red-500',       light: 'bg-rose-50 text-rose-700',       border: 'border-l-rose-400',    icon: Zap },
 }
 
 const CAL_CFG: Record<string, { bg: string; text: string; label: string }> = {
@@ -38,6 +47,8 @@ const CAL_CFG: Record<string, { bg: string; text: string; label: string }> = {
   vfu:      { bg: 'bg-teal-200/70',    text: 'text-teal-800',  label: 'VFU' },
   other:    { bg: 'bg-gray-200/60',    text: 'text-gray-700',  label: '' },
 }
+
+const NON_STUDY_TYPES = new Set(['lunch', 'break', 'gym'])
 
 const STATUS_LABELS: Record<BlockStatus, string> = {
   planned: 'Planerad', started: 'Pågår', done: 'Klar', skipped: 'Hoppades över',
@@ -123,6 +134,7 @@ export default function Schedule() {
   const [expandedBlock, setExpandedBlock] = useState<number | null>(null)
   const [postWorkEnabled, setPostWorkEnabled] = useState(false)
   const [postWorkMinutes, setPostWorkMinutes] = useState(30)
+  const weekAutoGenRef = useRef('')
   const navigate = useNavigate()
 
   const dateStr = toIso(currentDate)
@@ -161,10 +173,27 @@ export default function Schedule() {
         scheduleApi.lectures().catch(() => []),
         calendarApi.status().catch(() => ({ authenticated: false, email: null })),
       ])
-      setRangeBlocks(Array.isArray(blocks) ? blocks : [])
+      const blocksArr = Array.isArray(blocks) ? blocks : []
+      setRangeBlocks(blocksArr)
       setCalEvents(Array.isArray(events) ? events : [])
       setLectures(Array.isArray(lecturesData) ? lecturesData : [])
       setCalStatus(calData)
+
+      // Auto-generate current week if no blocks exist yet
+      const todayWeekStart = toIso(getWeekStart(new Date()))
+      if (
+        start === todayWeekStart &&
+        blocksArr.length === 0 &&
+        weekAutoGenRef.current !== todayWeekStart
+      ) {
+        weekAutoGenRef.current = todayWeekStart
+        setGenerating(true)
+        try {
+          await scheduleApi.generateWeek(start)
+          const newBlocks = await scheduleApi.blocks(start, end).catch(() => [])
+          setRangeBlocks(Array.isArray(newBlocks) ? newBlocks : [])
+        } catch { /* silent */ } finally { setGenerating(false) }
+      }
     } finally { setLoading(false) }
   }, [])
 
@@ -191,6 +220,17 @@ export default function Schedule() {
       })
       setPlan(result)
       setSavedBlocks(result.blocks)
+    } finally { setGenerating(false) }
+  }
+
+  async function generateWeek() {
+    setGenerating(true)
+    try {
+      await scheduleApi.generateWeek(toIso(weekDays[0]))
+      const start = toIso(weekDays[0])
+      const end = toIso(weekDays[6])
+      const newBlocks = await scheduleApi.blocks(start, end).catch(() => [])
+      setRangeBlocks(Array.isArray(newBlocks) ? newBlocks : [])
     } finally { setGenerating(false) }
   }
 
@@ -345,6 +385,15 @@ export default function Schedule() {
         </div>
       )}
 
+      {/* GCal reauth banner */}
+      {calStatus.authenticated && calStatus.needs_reauth && (
+        <div className="flex items-center gap-2 text-sm py-2 px-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl">
+          <AlertCircle size={14} />
+          Google Kalender behöver återansluts för att skapa en "Pluggis"-kalender.
+          Gå till <a href="/settings" className="underline font-medium">Inställningar → Kalender</a> och koppla bort / koppla in igen.
+        </div>
+      )}
+
       {/* ── Navigation ─────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3 bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3">
         <button onClick={goBack} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
@@ -395,15 +444,27 @@ export default function Schedule() {
 
       {/* ── Views ──────────────────────────────────────────────────────────── */}
       {viewMode === 'week' && (
-        <WeekTimeline
-          days={weekDays}
-          blocks={rangeBlocks}
-          calEvents={calEvents}
-          loading={loading}
-          todayStr={todayStr}
-          onDayClick={d => { setCurrentDate(d); setViewMode('day') }}
-          hourPx={WEEK_HOUR_PX}
-        />
+        <>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={generateWeek}
+              disabled={generating}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-primary-600 to-indigo-600 text-white rounded-xl shadow-sm hover:opacity-90 disabled:opacity-50 font-medium text-sm transition-all"
+            >
+              <RefreshCw size={15} className={generating ? 'animate-spin' : ''} />
+              {generating ? 'Genererar...' : 'Generera vecka'}
+            </button>
+          </div>
+          <WeekTimeline
+            days={weekDays}
+            blocks={rangeBlocks}
+            calEvents={calEvents}
+            loading={loading}
+            todayStr={todayStr}
+            onDayClick={d => { setCurrentDate(d); setViewMode('day') }}
+            hourPx={WEEK_HOUR_PX}
+          />
+        </>
       )}
 
       {viewMode === 'fiveweek' && (
@@ -617,7 +678,7 @@ function WeekTimeline({
           const ds = toIso(day)
           const isToday = ds === todayStr
           const dayBlocks = blocksByDay[ds] ?? []
-          const totalMins = dayBlocks.reduce((s, b) => s + b.duration_minutes, 0)
+          const totalMins = dayBlocks.filter(b => !NON_STUDY_TYPES.has(b.block_type)).reduce((s, b) => s + b.duration_minutes, 0)
           return (
             <button
               key={ds}
@@ -825,8 +886,9 @@ function FiveWeekView({
   if (loading) return <div className="py-16 text-center text-gray-400">Laddar 5-veckorsschema...</div>
 
   // Calculate total study hours across all 5 weeks
-  const totalMins = blocks.reduce((s, b) => s + b.duration_minutes, 0)
-  const doneBlocks = blocks.filter(b => b.status === 'done').length
+  const totalMins = blocks.filter(b => !NON_STUDY_TYPES.has(b.block_type)).reduce((s, b) => s + b.duration_minutes, 0)
+  const studyBlocks = blocks.filter(b => !NON_STUDY_TYPES.has(b.block_type))
+  const doneBlocks = studyBlocks.filter(b => b.status === 'done').length
 
   return (
     <div className="space-y-3">
@@ -836,11 +898,11 @@ function FiveWeekView({
           <Clock size={13} />
           <span><strong>{(totalMins / 60).toFixed(1)} h</strong> planerat</span>
           <span className="text-gray-300">·</span>
-          <span>{doneBlocks}/{blocks.length} block klara</span>
+          <span>{doneBlocks}/{studyBlocks.length} block klara</span>
           <div className="flex-1 bg-gray-100 rounded-full h-1.5 max-w-xs min-w-[60px]">
             <div
               className="bg-gradient-to-r from-emerald-500 to-green-400 h-1.5 rounded-full transition-all"
-              style={{ width: `${blocks.length ? Math.round(doneBlocks / blocks.length * 100) : 0}%` }}
+              style={{ width: `${studyBlocks.length ? Math.round(doneBlocks / studyBlocks.length * 100) : 0}%` }}
             />
           </div>
         </div>
@@ -878,7 +940,7 @@ function FiveWeekView({
                 const isToday = ds === todayStr
                 const dayBlocks = blocksByDay[ds] ?? []
                 const dayEvents = eventsByDay[ds] ?? []
-                const dayMins = dayBlocks.reduce((s, b) => s + b.duration_minutes, 0)
+                const dayMins = dayBlocks.filter(b => !NON_STUDY_TYPES.has(b.block_type)).reduce((s, b) => s + b.duration_minutes, 0)
                 const isWeekend = di >= 5
 
                 return (
@@ -1072,7 +1134,9 @@ function StudyBlockCard({
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-gray-800">{cfg.label}</span>
+              <span className="text-sm font-semibold text-gray-800">
+                {(block.payload?.label as string | undefined) || cfg.label}
+              </span>
               {block.compression_level > 0 && (
                 <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">komprimerad</span>
               )}
@@ -1131,6 +1195,12 @@ function StudyBlockCard({
 
       {expanded && block.payload && Object.keys(block.payload).length > 0 && (
         <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+          {/* Generic activity description — shown for any block type that has one */}
+          {(block.payload.description as string | undefined) && (
+            <p className="text-xs text-gray-700 leading-relaxed">
+              {block.payload.description as string}
+            </p>
+          )}
           {block.block_type === 'pre_lecture' && (
             <>
               {(block.payload.what_to_listen_for as string[] | undefined)?.length ? (
@@ -1146,11 +1216,11 @@ function StudyBlockCard({
               </button>
             </>
           )}
-          {block.block_type === 'daily_repetition' && (
+          {block.block_type === 'daily_repetition' && (block.payload.targeted_card_ids as number[] | undefined)?.length ? (
             <p className="text-xs text-gray-500">
-              {(block.payload.targeted_card_ids as number[] | undefined)?.length ?? 0} kort att repetera
+              {(block.payload.targeted_card_ids as number[]).length} kort att repetera
             </p>
-          )}
+          ) : null}
         </div>
       )}
     </div>

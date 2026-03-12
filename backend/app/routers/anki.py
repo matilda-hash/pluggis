@@ -12,8 +12,9 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from ..database import get_db, DEFAULT_USER_ID
-from ..models import Card, CardState, Deck
+from ..auth import get_current_user
+from ..database import get_db
+from ..models import Card, CardState, Deck, User
 from ..schemas import (
     AnkiStatus, AnkiStats, AnkiExportRequest,
     ImportApkgResult, ExportAnkiResult,
@@ -39,7 +40,10 @@ def anki_status():
 
 
 @router.get("/stats", response_model=AnkiStats)
-def anki_stats(db: Session = Depends(get_db)):
+def anki_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Return Anki due/new/lapse counts.
     Falls back to internal FSRS counts if Anki is unavailable.
@@ -68,12 +72,12 @@ def anki_stats(db: Session = Depends(get_db)):
     now = datetime.utcnow()
     due_count = (
         db.query(CS)
-        .filter(CS.user_id == DEFAULT_USER_ID, CS.state > 0, CS.due <= now)
+        .filter(CS.user_id == current_user.id, CS.state > 0, CS.due <= now)
         .count()
     )
     new_count = (
         db.query(CS)
-        .filter(CS.user_id == DEFAULT_USER_ID, CS.state == 0)
+        .filter(CS.user_id == current_user.id, CS.state == 0)
         .count()
     )
     return AnkiStats(
@@ -86,7 +90,11 @@ def anki_stats(db: Session = Depends(get_db)):
 
 
 @router.post("/export", response_model=ExportAnkiResult)
-def export_to_anki(req: AnkiExportRequest, db: Session = Depends(get_db)):
+def export_to_anki(
+    req: AnkiExportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Export internal cards to Anki via AnkiConnect."""
     client = _client()
     if not client.is_available():
@@ -97,7 +105,7 @@ def export_to_anki(req: AnkiExportRequest, db: Session = Depends(get_db)):
 
     cards = db.query(Card).filter(
         Card.id.in_(req.card_ids),
-        Card.deck.has(user_id=DEFAULT_USER_ID),
+        Card.deck.has(user_id=current_user.id),
     ).all()
 
     exported = 0
@@ -126,19 +134,33 @@ def export_to_anki(req: AnkiExportRequest, db: Session = Depends(get_db)):
 @router.post("/import", response_model=ImportApkgResult)
 async def import_apkg(
     file: UploadFile = File(...),
-    deck_id: int = Form(...),
+    deck_id: int = Form(None),
+    new_deck_name: str = Form(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Import an Anki .apkg file into the internal database.
-    .apkg is a zip containing collection.anki2 (SQLite).
+    Either deck_id (existing deck) or new_deck_name (creates a new deck) must be provided.
     """
     if not file.filename.lower().endswith(".apkg"):
         raise HTTPException(status_code=422, detail="Only .apkg files are supported")
 
-    deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == DEFAULT_USER_ID).first()
-    if not deck:
-        raise HTTPException(status_code=404, detail="Deck not found")
+    if new_deck_name:
+        deck = Deck(
+            user_id=current_user.id,
+            name=new_deck_name,
+            source_type="anki_import",
+        )
+        db.add(deck)
+        db.commit()
+        db.refresh(deck)
+    elif deck_id:
+        deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == current_user.id).first()
+        if not deck:
+            raise HTTPException(status_code=404, detail="Deck not found")
+    else:
+        raise HTTPException(status_code=422, detail="Either deck_id or new_deck_name must be provided")
 
     content = await file.read()
 
@@ -150,21 +172,75 @@ async def import_apkg(
         try:
             with zipfile.ZipFile(apkg_path, "r") as zf:
                 names = zf.namelist()
-                # Try collection.anki21 first (newer format), fall back to collection.anki2
-                db_name = "collection.anki21" if "collection.anki21" in names else "collection.anki2"
-                if db_name not in names:
+                candidates = [n for n in ("collection.anki2", "collection.anki21", "collection.anki21b") if n in names]
+                if not candidates:
                     raise HTTPException(status_code=422, detail="Invalid .apkg: no collection database found")
-                zf.extract(db_name, tmpdir)
+                for db_name in candidates:
+                    zf.extract(db_name, tmpdir)
         except zipfile.BadZipFile:
             raise HTTPException(status_code=422, detail="Invalid .apkg file (bad zip)")
 
-        collection_path = os.path.join(tmpdir, db_name)
-        imported, skipped = _import_from_collection(collection_path, deck_id, db)
+        # Pick the format that yields the most importable notes
+        best_path = None
+        best_count = -1
+        for db_name in candidates:
+            path = os.path.join(tmpdir, db_name)
+            count = _count_real_notes(path)
+            if count > best_count:
+                best_count = count
+                best_path = path
+
+        imported, skipped = _import_from_collection(best_path, deck.id, current_user.id, db)
 
     return ImportApkgResult(imported=imported, skipped=skipped, deck_name=deck.name)
 
 
-def _import_from_collection(collection_path: str, deck_id: int, db: Session) -> tuple[int, int]:
+
+def _count_real_notes(collection_path: str) -> int:
+    """Return how many non-compat notes are in the collection database."""
+    try:
+        conn = sqlite3.connect(collection_path)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(notes)")
+        col_names = {row[1] for row in cursor.fetchall()}
+        if "flds" in col_names:
+            cursor.execute("SELECT flds FROM notes")
+        elif "fields" in col_names:
+            cursor.execute("SELECT fields FROM notes")
+        else:
+            conn.close()
+            return 0
+        count = sum(1 for (flds,) in cursor.fetchall() if not _is_compat_note(flds.split("\x1f")))
+        conn.close()
+        return count
+    except Exception:
+        return 0
+
+
+def _is_compat_note(fields: list[str]) -> bool:
+    """Return True if this note is an Anki compatibility/system warning note."""
+    combined = "\x1f".join(fields).lower()
+    # Strip HTML tags for cleaner matching
+    import re as _re
+    text = _re.sub(r"<[^>]+>", " ", combined)
+
+    if "ankiweb.net" in text:
+        return True
+    # Swedish warning phrases
+    if "ankiversionen" in text:
+        return True
+    if "uppdatera" in text and "anki" in text:
+        return True
+    # English: any form of "update/upgrade anki"
+    if ("update" in text or "upgrade" in text) and "anki" in text:
+        return True
+    # Catch "try again" phrasing used in some versions
+    if "try again" in text and "anki" in text:
+        return True
+    return False
+
+
+def _import_from_collection(collection_path: str, deck_id: int, user_id: int, db: Session) -> tuple[int, int]:
     """Parse Anki collection SQLite and create Card + CardState rows."""
     imported = 0
     skipped = 0
@@ -172,8 +248,17 @@ def _import_from_collection(collection_path: str, deck_id: int, db: Session) -> 
     conn = sqlite3.connect(collection_path)
     try:
         cursor = conn.cursor()
-        # notes table: id, mid (model id), flds (fields separated by \x1f), tags
-        cursor.execute("SELECT flds, tags FROM notes")
+        # Check which columns exist — anki21b may use different names
+        cursor.execute("PRAGMA table_info(notes)")
+        col_names = {row[1] for row in cursor.fetchall()}
+        if "flds" in col_names and "tags" in col_names:
+            cursor.execute("SELECT flds, tags FROM notes")
+        elif "fields" in col_names and "tags" in col_names:
+            cursor.execute("SELECT fields, tags FROM notes")
+        else:
+            # Fallback: no recognisable column names — skip this collection
+            conn.close()
+            return 0, 0
         rows = cursor.fetchall()
     except Exception:
         conn.close()
@@ -187,10 +272,13 @@ def _import_from_collection(collection_path: str, deck_id: int, db: Session) -> 
             skipped += 1
             continue
 
+        if _is_compat_note(fields):
+            skipped += 1
+            continue
+
         tags = [t.strip() for t in tags_str.strip().split() if t.strip()]
 
         if len(fields) == 1:
-            # Likely a cloze card
             card = Card(
                 deck_id=deck_id,
                 card_type="cloze",
@@ -198,7 +286,6 @@ def _import_from_collection(collection_path: str, deck_id: int, db: Session) -> 
                 tags=tags,
             )
         elif len(fields) >= 2:
-            # Basic card: first field = front, second = back
             front = fields[0].strip()
             back = fields[1].strip()
             if not front:
@@ -217,7 +304,7 @@ def _import_from_collection(collection_path: str, deck_id: int, db: Session) -> 
 
         db.add(card)
         db.flush()
-        state = CardState(card_id=card.id, user_id=DEFAULT_USER_ID, state=0)
+        state = CardState(card_id=card.id, user_id=user_id, state=0)
         db.add(state)
         imported += 1
 

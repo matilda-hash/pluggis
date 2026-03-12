@@ -43,6 +43,8 @@ export default function Upload() {
   const [apkgFile, setApkgFile] = useState<File | null>(null)
   const [decks, setDecks] = useState<Deck[]>([])
   const [selectedDeckId, setSelectedDeckId] = useState<number | ''>('')
+  const [apkgDeckMode, setApkgDeckMode] = useState<'existing' | 'new'>('existing')
+  const [newDeckName, setNewDeckName] = useState('')
   const [apkgPhase, setApkgPhase] = useState<ApkgPhase>('idle')
   const [apkgResult, setApkgResult] = useState<{ imported: number; skipped: number; deck_name: string } | null>(null)
   const [apkgError, setApkgError] = useState<string | null>(null)
@@ -119,11 +121,17 @@ export default function Upload() {
 
   // ── APKG handler ───────────────────────────────────────────────────────────
   const handleApkgImport = async () => {
-    if (!apkgFile || selectedDeckId === '') return
+    const canImport = apkgFile && (
+      (apkgDeckMode === 'existing' && selectedDeckId !== '') ||
+      (apkgDeckMode === 'new' && newDeckName.trim() !== '')
+    )
+    if (!canImport) return
     setApkgPhase('importing')
     setApkgError(null)
     try {
-      const res = await ankiApi.importApkg(apkgFile, selectedDeckId as number)
+      const res = apkgDeckMode === 'new'
+        ? await ankiApi.importApkg(apkgFile!, undefined, newDeckName.trim())
+        : await ankiApi.importApkg(apkgFile!, selectedDeckId as number)
       setApkgResult(res)
       setApkgPhase('done')
     } catch (e: unknown) {
@@ -456,26 +464,66 @@ export default function Upload() {
               {/* Deck selector */}
               {apkgFile && (
                 <div className="card p-5 space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                      Lägg till i kortlek
-                    </label>
-                    <select
-                      value={selectedDeckId}
-                      onChange={e => setSelectedDeckId(e.target.value === '' ? '' : Number(e.target.value))}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 outline-none bg-white"
+                  {/* Mode toggle */}
+                  <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+                    <button
+                      onClick={() => setApkgDeckMode('existing')}
+                      className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                        apkgDeckMode === 'existing'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
                     >
-                      <option value="">Välj kortlek...</option>
-                      {decks.map(d => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
-                      ))}
-                    </select>
-                    {decks.length === 0 && (
-                      <p className="text-xs text-gray-400 mt-1">
-                        Inga kortlekar hittades – skapa en kortlek på sidan Kortlekar först
-                      </p>
-                    )}
+                      Befintlig kortlek
+                    </button>
+                    <button
+                      onClick={() => setApkgDeckMode('new')}
+                      className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                        apkgDeckMode === 'new'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      Ny kortlek
+                    </button>
                   </div>
+
+                  {apkgDeckMode === 'existing' ? (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                        Lägg till i kortlek
+                      </label>
+                      <select
+                        value={selectedDeckId}
+                        onChange={e => setSelectedDeckId(e.target.value === '' ? '' : Number(e.target.value))}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 outline-none bg-white"
+                      >
+                        <option value="">Välj kortlek...</option>
+                        {decks.map(d => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                      {decks.length === 0 && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          Inga kortlekar hittades. Välj "Ny kortlek" för att skapa en.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                        Namn på ny kortlek
+                      </label>
+                      <input
+                        type="text"
+                        value={newDeckName}
+                        onChange={e => setNewDeckName(e.target.value)}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 outline-none"
+                        placeholder="t.ex. Mikrobiologi – Anki-import"
+                      />
+                    </div>
+                  )}
+
                   <p className="text-xs text-gray-400">
                     Korten importeras till vald kortlek. Duplicat hoppas över automatiskt.
                   </p>
@@ -491,7 +539,12 @@ export default function Upload() {
 
               <button
                 onClick={handleApkgImport}
-                disabled={!apkgFile || selectedDeckId === '' || apkgPhase === 'importing'}
+                disabled={
+                  !apkgFile ||
+                  apkgPhase === 'importing' ||
+                  (apkgDeckMode === 'existing' && selectedDeckId === '') ||
+                  (apkgDeckMode === 'new' && newDeckName.trim() === '')
+                }
                 className="w-full btn-primary py-3 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {apkgPhase === 'importing' ? (

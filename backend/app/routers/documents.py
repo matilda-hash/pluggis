@@ -1,6 +1,5 @@
 """
 Document management router.
-Handles PDF upload → HTML conversion, highlight management, and card generation from highlights.
 """
 
 import uuid
@@ -9,8 +8,9 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from ..database import get_db, DEFAULT_USER_ID
-from ..models import Card, CardState, Deck, Document, DocumentHighlight, GeneratedCardMeta
+from ..auth import get_current_user
+from ..database import get_db
+from ..models import Card, CardState, Deck, Document, DocumentHighlight, GeneratedCardMeta, User
 from ..schemas import (
     ConfirmDocumentCards, DocumentListItem, DocumentOut,
     GenerateFromHighlightsRequest, GeneratedCard,
@@ -24,16 +24,14 @@ UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 
-# ── Document CRUD ─────────────────────────────────────────────────────────────
-
 @router.post("/upload")
 async def upload_document(
     file: UploadFile = File(...),
     deck_id: int = Form(None),
     title: str = Form(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Upload a PDF, convert to HTML, save Document row. Returns HTML for preview."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=422, detail="Only PDF files are supported")
 
@@ -42,9 +40,8 @@ async def upload_document(
     content = await file.read()
     file_path.write_bytes(content)
 
-    # Validate deck if provided
     if deck_id:
-        deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == DEFAULT_USER_ID).first()
+        deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == current_user.id).first()
         if not deck:
             raise HTTPException(status_code=404, detail="Deck not found")
 
@@ -57,7 +54,7 @@ async def upload_document(
         raise HTTPException(status_code=500, detail=f"PDF conversion failed: {e}")
 
     doc = Document(
-        user_id=DEFAULT_USER_ID,
+        user_id=current_user.id,
         deck_id=deck_id,
         title=doc_title,
         original_filename=file.filename,
@@ -77,8 +74,11 @@ async def upload_document(
 
 
 @router.get("/", response_model=list[DocumentListItem])
-def list_documents(db: Session = Depends(get_db)):
-    docs = db.query(Document).filter(Document.user_id == DEFAULT_USER_ID).order_by(Document.created_at.desc()).all()
+def list_documents(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    docs = db.query(Document).filter(Document.user_id == current_user.id).order_by(Document.created_at.desc()).all()
     result = []
     for doc in docs:
         highlight_count = db.query(DocumentHighlight).filter(DocumentHighlight.document_id == doc.id).count()
@@ -94,24 +94,34 @@ def list_documents(db: Session = Depends(get_db)):
 
 
 @router.get("/{doc_id}", response_model=DocumentOut)
-def get_document(doc_id: int, db: Session = Depends(get_db)):
-    doc = _get_doc(doc_id, db)
-    return doc
+def get_document(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _get_doc(doc_id, db, current_user.id)
 
 
 @router.delete("/{doc_id}")
-def delete_document(doc_id: int, db: Session = Depends(get_db)):
-    doc = _get_doc(doc_id, db)
+def delete_document(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    doc = _get_doc(doc_id, db, current_user.id)
     db.delete(doc)
     db.commit()
     return {"ok": True}
 
 
-# ── Highlights ────────────────────────────────────────────────────────────────
-
 @router.post("/{doc_id}/highlights", response_model=HighlightOut)
-def add_highlight(doc_id: int, req: HighlightCreate, db: Session = Depends(get_db)):
-    _get_doc(doc_id, db)  # 404 if not found
+def add_highlight(
+    doc_id: int,
+    req: HighlightCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _get_doc(doc_id, db, current_user.id)
 
     valid_priorities = {"important", "difficult", "low"}
     if req.priority not in valid_priorities:
@@ -119,7 +129,7 @@ def add_highlight(doc_id: int, req: HighlightCreate, db: Session = Depends(get_d
 
     highlight = DocumentHighlight(
         document_id=doc_id,
-        user_id=DEFAULT_USER_ID,
+        user_id=current_user.id,
         priority=req.priority,
         text_content=req.text_content,
         html_range_start=req.html_range_start,
@@ -132,20 +142,28 @@ def add_highlight(doc_id: int, req: HighlightCreate, db: Session = Depends(get_d
 
 
 @router.get("/{doc_id}/highlights", response_model=list[HighlightOut])
-def list_highlights(doc_id: int, db: Session = Depends(get_db)):
-    _get_doc(doc_id, db)
-    highlights = (
+def list_highlights(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _get_doc(doc_id, db, current_user.id)
+    return (
         db.query(DocumentHighlight)
         .filter(DocumentHighlight.document_id == doc_id)
         .order_by(DocumentHighlight.created_at)
         .all()
     )
-    return highlights
 
 
 @router.delete("/{doc_id}/highlights/{highlight_id}")
-def delete_highlight(doc_id: int, highlight_id: int, db: Session = Depends(get_db)):
-    _get_doc(doc_id, db)
+def delete_highlight(
+    doc_id: int,
+    highlight_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _get_doc(doc_id, db, current_user.id)
     h = db.query(DocumentHighlight).filter(
         DocumentHighlight.id == highlight_id,
         DocumentHighlight.document_id == doc_id,
@@ -157,22 +175,19 @@ def delete_highlight(doc_id: int, highlight_id: int, db: Session = Depends(get_d
     return {"ok": True}
 
 
-# ── Card generation ───────────────────────────────────────────────────────────
-
 @router.post("/{doc_id}/generate-cards")
 def generate_cards_from_highlights(
     doc_id: int,
     req: GenerateFromHighlightsRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Generate flashcard previews from highlighted sections. Requires Claude API."""
-    doc = _get_doc(doc_id, db)
+    doc = _get_doc(doc_id, db, current_user.id)
 
-    deck = db.query(Deck).filter(Deck.id == req.deck_id, Deck.user_id == DEFAULT_USER_ID).first()
+    deck = db.query(Deck).filter(Deck.id == req.deck_id, Deck.user_id == current_user.id).first()
     if not deck:
         raise HTTPException(status_code=404, detail="Deck not found")
 
-    # Load highlights
     if req.highlight_ids:
         highlights = (
             db.query(DocumentHighlight)
@@ -222,11 +237,15 @@ def generate_cards_from_highlights(
 
 
 @router.post("/{doc_id}/confirm-cards")
-def confirm_document_cards(doc_id: int, data: ConfirmDocumentCards, db: Session = Depends(get_db)):
-    """Save approved cards from document highlights to the database."""
-    _get_doc(doc_id, db)
+def confirm_document_cards(
+    doc_id: int,
+    data: ConfirmDocumentCards,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _get_doc(doc_id, db, current_user.id)
 
-    deck = db.query(Deck).filter(Deck.id == data.deck_id, Deck.user_id == DEFAULT_USER_ID).first()
+    deck = db.query(Deck).filter(Deck.id == data.deck_id, Deck.user_id == current_user.id).first()
     if not deck:
         raise HTTPException(status_code=404, detail="Deck not found")
 
@@ -243,7 +262,7 @@ def confirm_document_cards(doc_id: int, data: ConfirmDocumentCards, db: Session 
         db.add(card)
         db.flush()
 
-        state = CardState(card_id=card.id, user_id=DEFAULT_USER_ID, state=0)
+        state = CardState(card_id=card.id, user_id=current_user.id, state=0)
         db.add(state)
 
         meta = GeneratedCardMeta(
@@ -263,12 +282,10 @@ def confirm_document_cards(doc_id: int, data: ConfirmDocumentCards, db: Session 
     return {"ok": True, "cards_saved": created, "deck_id": deck.id}
 
 
-# ── Helper ────────────────────────────────────────────────────────────────────
-
-def _get_doc(doc_id: int, db: Session) -> Document:
+def _get_doc(doc_id: int, db: Session, user_id: int) -> Document:
     doc = db.query(Document).filter(
         Document.id == doc_id,
-        Document.user_id == DEFAULT_USER_ID,
+        Document.user_id == user_id,
     ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")

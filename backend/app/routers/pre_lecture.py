@@ -5,8 +5,9 @@ Pre-lecture block content router.
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ..database import get_db, DEFAULT_USER_ID
-from ..models import Lecture, StudyBlock
+from ..auth import get_current_user
+from ..database import get_db
+from ..models import Lecture, StudyBlock, User
 from ..schemas import MiniQuizRequest, PreLecturePayload
 from ..services.anki_connect import AnkiConnectClient
 from ..services.pre_lecture import PreLectureGenerator
@@ -14,10 +15,10 @@ from ..services.pre_lecture import PreLectureGenerator
 router = APIRouter(prefix="/pre-lecture", tags=["pre-lecture"])
 
 
-def _get_lecture_or_404(lecture_id: int, db: Session) -> Lecture:
+def _get_lecture_or_404(lecture_id: int, user_id: int, db: Session) -> Lecture:
     lecture = db.query(Lecture).filter(
         Lecture.id == lecture_id,
-        Lecture.user_id == DEFAULT_USER_ID,
+        Lecture.user_id == user_id,
     ).first()
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
@@ -25,21 +26,19 @@ def _get_lecture_or_404(lecture_id: int, db: Session) -> Lecture:
 
 
 @router.get("/{lecture_id}")
-def get_pre_lecture_content(lecture_id: int, db: Session = Depends(get_db)):
-    """
-    Return pre-lecture block payload.
-    If a StudyBlock with type=pre_lecture exists for this lecture and has payload,
-    return that. Otherwise generate fresh.
-    """
-    lecture = _get_lecture_or_404(lecture_id, db)
+def get_pre_lecture_content(
+    lecture_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    lecture = _get_lecture_or_404(lecture_id, current_user.id, db)
 
-    # Check for existing block with cached payload
     existing_block = (
         db.query(StudyBlock)
         .filter(
             StudyBlock.lecture_id == lecture_id,
             StudyBlock.block_type == "pre_lecture",
-            StudyBlock.user_id == DEFAULT_USER_ID,
+            StudyBlock.user_id == current_user.id,
         )
         .first()
     )
@@ -47,7 +46,6 @@ def get_pre_lecture_content(lecture_id: int, db: Session = Depends(get_db)):
     if existing_block and existing_block.payload and existing_block.payload.get("mini_quiz") is not None:
         return existing_block.payload
 
-    # Generate fresh
     try:
         generator = PreLectureGenerator()
         anki_client = AnkiConnectClient()
@@ -57,7 +55,6 @@ def get_pre_lecture_content(lecture_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Pre-lecture generation failed: {e}")
 
-    # Cache in existing block if available
     if existing_block:
         existing_block.payload = payload
         db.commit()
@@ -70,9 +67,9 @@ def generate_mini_quiz(
     lecture_id: int,
     req: MiniQuizRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Generate a fresh mini-quiz for a lecture."""
-    lecture = _get_lecture_or_404(lecture_id, db)
+    lecture = _get_lecture_or_404(lecture_id, current_user.id, db)
 
     try:
         generator = PreLectureGenerator()
@@ -88,9 +85,12 @@ def generate_mini_quiz(
 
 
 @router.post("/{lecture_id}/refresh")
-def refresh_pre_lecture(lecture_id: int, db: Session = Depends(get_db)):
-    """Regenerate pre-lecture content from scratch."""
-    lecture = _get_lecture_or_404(lecture_id, db)
+def refresh_pre_lecture(
+    lecture_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    lecture = _get_lecture_or_404(lecture_id, current_user.id, db)
 
     try:
         generator = PreLectureGenerator()
@@ -99,13 +99,12 @@ def refresh_pre_lecture(lecture_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Pre-lecture generation failed: {e}")
 
-    # Update block payload if exists
     existing_block = (
         db.query(StudyBlock)
         .filter(
             StudyBlock.lecture_id == lecture_id,
             StudyBlock.block_type == "pre_lecture",
-            StudyBlock.user_id == DEFAULT_USER_ID,
+            StudyBlock.user_id == current_user.id,
         )
         .first()
     )

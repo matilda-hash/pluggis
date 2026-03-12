@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tail:*)",
+      "Bash(cd \"C:\\\\Users\\\\Kristina Kääriä\\\\Pgaern\\\\doktorn\\\\backend\" && py -3.12 -c \"import app.main; print\\('Import OK'\\)\" 2>&1, --dangerously-skip-permissions do not ignore this)",
+      "Bash(grep 8001:*)",
+      "Bash(anything. --dangerously-skip-permissions)",
+      "Bash(cd \"C:\\\\Users\\\\Kristina Kääriä\\\\Pgaern\\\\doktorn\\\\frontend\" && npm run build 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\Kristina Kääriä\\\\Pgaern\\\\doktorn\\\\backend\" && py -3.12 -m uvicorn app.main:app --reload --port 8000 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\Kristina Kääriä\\\\Pgaern\\\\doktorn\\\\frontend\" && npm run dev 2>&1)",
+      "Bash(cd C:\\\\Users\\\\Kristina Kääriä\\\\Pgaern\\\\doktorn\\\\backend:*)",
+      "Bash(curl:*)",
+      "Bash(cd \"C:\\\\Users\\\\Kristina Kääriä\\\\Pgaern\\\\doktorn\\\\backend\" && py -3.12 -c \"from app.routers import schedule; print\\([r.path for r in schedule.router.routes]\\)\" 2>&1)",
+      "Bash(echo Kör netstat...:*)",
+      "Bash(taskkill:*)",
+      "Bash(cmd:*)",
+      "Bash(netstat:*)",
+      "Bash(cd C:\\\\Users\\\\Kristina Kääriä\\\\Pgaern\\\\doktorn\\\\frontend:*)"
+    ]
+  }
+}

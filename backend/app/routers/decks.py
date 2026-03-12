@@ -4,15 +4,16 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ..database import get_db, DEFAULT_USER_ID
-from ..models import Deck, Card, CardState, Review
+from ..auth import get_current_user, get_optional_user
+from ..database import get_db
+from ..models import Card, CardState, Deck, Review, User
 from ..schemas import DeckCreate, DeckUpdate, DeckOut, DeckStats
 from ..services.fsrs import State
 
 router = APIRouter(prefix="/decks", tags=["decks"])
 
 
-def compute_deck_stats(deck_id: int, db: Session, nearest_exam=None) -> DeckStats:
+def compute_deck_stats(deck_id: int, db: Session, nearest_exam=None, user_id: int = 1) -> DeckStats:
     now = datetime.utcnow()
 
     total = db.query(Card).filter(Card.deck_id == deck_id, Card.is_suspended == False).count()
@@ -51,7 +52,7 @@ def compute_deck_stats(deck_id: int, db: Session, nearest_exam=None) -> DeckStat
     week_ago = now - timedelta(days=7)
     recent_reviews = (
         db.query(Review).join(Card)
-        .filter(Card.deck_id == deck_id, Review.user_id == DEFAULT_USER_ID, Review.reviewed_at >= week_ago)
+        .filter(Card.deck_id == deck_id, Review.user_id == user_id, Review.reviewed_at >= week_ago)
         .all()
     )
     recent_forget_rate = 0.0
@@ -89,47 +90,117 @@ def compute_deck_stats(deck_id: int, db: Session, nearest_exam=None) -> DeckStat
     )
 
 
-@router.get("/", response_model=List[DeckOut])
-def list_decks(db: Session = Depends(get_db)):
-    from ..routers.exams import get_nearest_exam
-    nearest_exam = get_nearest_exam(db, DEFAULT_USER_ID)
-    decks = db.query(Deck).filter(Deck.user_id == DEFAULT_USER_ID, Deck.is_active == True).all()
+@router.get("/public", response_model=List[DeckOut])
+def list_public_decks(db: Session = Depends(get_db)):
+    """List all public decks — no auth required."""
+    decks = db.query(Deck).filter(Deck.is_public == True, Deck.is_active == True).all()
     result = []
     for deck in decks:
         out = DeckOut.model_validate(deck)
-        out.stats = compute_deck_stats(deck.id, db, nearest_exam)
+        out.stats = compute_deck_stats(deck.id, db, user_id=deck.user_id)
         result.append(out)
-    # Sort: exam-relevant first, then most due
+    return result
+
+
+@router.post("/{deck_id}/copy", response_model=DeckOut)
+def copy_deck(
+    deck_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Copy a public deck (and its cards) to the current user's account."""
+    source = db.query(Deck).filter(Deck.id == deck_id, Deck.is_public == True).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Public deck not found")
+
+    new_deck = Deck(
+        user_id=current_user.id,
+        name=f"{source.name} (kopia)",
+        description=source.description,
+        color=source.color,
+        source_type=source.source_type,
+        source_filename=source.source_filename,
+    )
+    db.add(new_deck)
+    db.flush()
+
+    for card in source.cards:
+        from ..models import CardState as CS
+        new_card = Card(
+            deck_id=new_deck.id,
+            card_type=card.card_type,
+            front=card.front,
+            back=card.back,
+            cloze_text=card.cloze_text,
+            tags=card.tags or [],
+        )
+        db.add(new_card)
+        db.flush()
+        db.add(CS(card_id=new_card.id, user_id=current_user.id, state=0))
+
+    db.commit()
+    db.refresh(new_deck)
+    out = DeckOut.model_validate(new_deck)
+    out.stats = compute_deck_stats(new_deck.id, db, user_id=current_user.id)
+    return out
+
+
+@router.get("/", response_model=List[DeckOut])
+def list_decks(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from ..routers.exams import get_nearest_exam
+    nearest_exam = get_nearest_exam(db, current_user.id)
+    decks = db.query(Deck).filter(Deck.user_id == current_user.id, Deck.is_active == True).all()
+    result = []
+    for deck in decks:
+        out = DeckOut.model_validate(deck)
+        out.stats = compute_deck_stats(deck.id, db, nearest_exam, user_id=current_user.id)
+        result.append(out)
     result.sort(key=lambda d: (-(d.stats.exam_priority if d.stats else 0), -(d.stats.due_today if d.stats else 0)))
     return result
 
 
 @router.post("/", response_model=DeckOut)
-def create_deck(data: DeckCreate, db: Session = Depends(get_db)):
-    deck = Deck(user_id=DEFAULT_USER_ID, **data.model_dump())
+def create_deck(
+    data: DeckCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    deck = Deck(user_id=current_user.id, **data.model_dump())
     db.add(deck)
     db.commit()
     db.refresh(deck)
     out = DeckOut.model_validate(deck)
-    out.stats = compute_deck_stats(deck.id, db)
+    out.stats = compute_deck_stats(deck.id, db, user_id=current_user.id)
     return out
 
 
 @router.get("/{deck_id}", response_model=DeckOut)
-def get_deck(deck_id: int, db: Session = Depends(get_db)):
-    deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == DEFAULT_USER_ID).first()
+def get_deck(
+    deck_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == current_user.id).first()
     if not deck:
         raise HTTPException(status_code=404, detail="Kortlek hittades inte")
     from ..routers.exams import get_nearest_exam
-    nearest_exam = get_nearest_exam(db, DEFAULT_USER_ID)
+    nearest_exam = get_nearest_exam(db, current_user.id)
     out = DeckOut.model_validate(deck)
-    out.stats = compute_deck_stats(deck.id, db, nearest_exam)
+    out.stats = compute_deck_stats(deck.id, db, nearest_exam, user_id=current_user.id)
     return out
 
 
 @router.put("/{deck_id}", response_model=DeckOut)
-def update_deck(deck_id: int, data: DeckUpdate, db: Session = Depends(get_db)):
-    deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == DEFAULT_USER_ID).first()
+def update_deck(
+    deck_id: int,
+    data: DeckUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == current_user.id).first()
     if not deck:
         raise HTTPException(status_code=404, detail="Kortlek hittades inte")
     for field, value in data.model_dump(exclude_none=True).items():
@@ -137,13 +208,17 @@ def update_deck(deck_id: int, data: DeckUpdate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(deck)
     out = DeckOut.model_validate(deck)
-    out.stats = compute_deck_stats(deck.id, db)
+    out.stats = compute_deck_stats(deck.id, db, user_id=current_user.id)
     return out
 
 
 @router.delete("/{deck_id}")
-def delete_deck(deck_id: int, db: Session = Depends(get_db)):
-    deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == DEFAULT_USER_ID).first()
+def delete_deck(
+    deck_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == current_user.id).first()
     if not deck:
         raise HTTPException(status_code=404, detail="Kortlek hittades inte")
     db.delete(deck)

@@ -10,6 +10,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, default="Local User")
     email = Column(String, unique=True, nullable=True)
+    password_hash = Column(String, nullable=True)  # nullable for migration; existing single user stays
     daily_goal = Column(Integer, default=80)
     created_at = Column(DateTime, default=datetime.utcnow)
     settings = Column(JSON, default={})
@@ -38,6 +39,7 @@ class Deck(Base):
     color = Column(String, default="#4F46E5")
     source_type = Column(String, nullable=True)  # 'pdf', 'manual', 'audio'
     source_filename = Column(String, nullable=True)
+    is_public = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -144,6 +146,8 @@ class Exam(Base):
     name = Column(String, nullable=False)          # e.g. "Neurologi tentamen"
     exam_date = Column(DateTime, nullable=False)
     description = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)            # free-text study notes for AI to parse
+    study_config = Column(JSON, nullable=True)     # AI-generated study strategy
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="exams")
@@ -338,3 +342,201 @@ class OAuthToken(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="oauth_tokens")
+
+
+# ─── AI Scheduling System ──────────────────────────────────────────────────────
+
+class StudentProfile(Base):
+    """Onboarding data: schedule preferences, rhythm, commitments."""
+    __tablename__ = "student_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+
+    wake_time = Column(String, default="07:00")
+    sleep_time = Column(String, default="23:00")
+    peak_hours_start = Column(String, default="09:00")
+    peak_hours_end = Column(String, default="13:00")
+    max_daily_study_hours = Column(Float, default=7.0)
+    preferred_session_length_minutes = Column(Integer, default=50)
+    preferred_break_length_minutes = Column(Integer, default=10)
+    recurring_commitments = Column(JSON, default=[])
+    commute_to_campus_minutes = Column(Integer, default=0)
+    study_location_preference = Column(String, default="home")
+    gym_days = Column(JSON, default=[])
+    gym_time = Column(String, default="evening")
+    gym_duration_minutes = Column(Integer, default=60)
+    session_structure_preference = Column(String, default="focus_50")
+    difficulty_preference = Column(String, default="adaptive")
+    feedback_style = Column(String, default="direct")
+    prior_bio_exposure = Column(Boolean, default=False)
+    prior_chem_exposure = Column(Boolean, default=False)
+    self_efficacy_score = Column(Float, default=3.0)
+    onboarding_completed = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", backref="student_profile", uselist=False)
+
+
+class ExamTopic(Base):
+    """A study topic linked to an exam, tracked with topic-level FSRS."""
+    __tablename__ = "exam_topics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exam_id = Column(Integer, ForeignKey("exams.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String, nullable=False)
+    subject = Column(String, nullable=False)
+    parent_topic_id = Column(Integer, ForeignKey("exam_topics.id"), nullable=True)
+
+    fsrs_stability = Column(Float, default=1.0)
+    fsrs_difficulty = Column(Float, default=5.0)
+    fsrs_retrievability = Column(Float, default=0.0)
+    fsrs_last_review = Column(DateTime, nullable=True)
+    fsrs_next_review = Column(DateTime, nullable=True)
+
+    mastery_level = Column(String, default="not_started")
+    mastery_score = Column(Float, default=0.0)
+    total_study_minutes = Column(Integer, default=0)
+    total_review_sessions = Column(Integer, default=0)
+    average_quiz_score = Column(Float, default=0.0)
+    last_quiz_score = Column(Float, nullable=True)
+    error_streak = Column(Integer, default=0)
+    estimated_hours_to_master = Column(Float, default=3.0)
+    source_document_ids = Column(JSON, default=[])
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    exam = relationship("Exam", backref="topics")
+    user = relationship("User", backref="exam_topics")
+    subtopics = relationship("ExamTopic", backref="parent", remote_side=[id])
+
+
+class AISchedule(Base):
+    """AI-generated daily study schedule."""
+    __tablename__ = "ai_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    schedule_date = Column(String, nullable=False)
+    generated_at = Column(DateTime, default=datetime.utcnow)
+    total_study_minutes = Column(Integer, default=0)
+    summary = Column(Text, nullable=True)
+    tomorrow_preview = Column(Text, nullable=True)
+    ai_raw = Column(JSON, nullable=True)
+    generation_attempts = Column(Integer, default=1)
+    student_approved = Column(Boolean, default=False)
+    student_feedback = Column(Text, nullable=True)
+
+    user = relationship("User", backref="ai_schedules")
+    blocks = relationship("AIStudyBlock", back_populates="schedule", cascade="all, delete-orphan")
+
+
+class AIStudyBlock(Base):
+    """A single block within an AI-generated schedule."""
+    __tablename__ = "ai_study_blocks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schedule_id = Column(Integer, ForeignKey("ai_schedules.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    topic_id = Column(Integer, ForeignKey("exam_topics.id"), nullable=True)
+
+    block_number = Column(Integer, default=1)
+    start_time = Column(String, nullable=True)
+    end_time = Column(String, nullable=True)
+    duration_minutes = Column(Integer, default=50)
+    subject = Column(String, nullable=True)
+    topic = Column(String, nullable=True)
+    subtopic = Column(String, nullable=True)
+    block_type = Column(String, nullable=False)
+    study_technique = Column(String, nullable=True)
+    activity_title = Column(String, nullable=True)
+    activity_description = Column(Text, nullable=True)
+    resources = Column(JSON, default=[])
+    learning_objective = Column(Text, nullable=True)
+    is_spaced_repetition = Column(Boolean, default=False)
+    location = Column(String, default="home")
+    requires_screen = Column(Boolean, default=True)
+    difficulty = Column(Integer, default=3)
+    break_after_minutes = Column(Integer, default=10)
+
+    completed = Column(Boolean, default=False)
+    completion_percentage = Column(Integer, default=0)
+    self_reported_difficulty = Column(Integer, nullable=True)
+    completion_notes = Column(Text, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    schedule = relationship("AISchedule", back_populates="blocks")
+    user = relationship("User", backref="ai_study_blocks")
+    exam_topic = relationship("ExamTopic", backref="study_blocks")
+
+
+class WeeklyCheckin(Base):
+    """Weekly study check-in with AI analysis."""
+    __tablename__ = "weekly_checkins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    week_start_date = Column(String, nullable=False)
+
+    actual_study_hours = Column(Float, default=0.0)
+    target_study_hours = Column(Float, default=0.0)
+    sessions_completed = Column(Integer, default=0)
+    sessions_skipped = Column(Integer, default=0)
+    retention_by_subject = Column(JSON, default={})
+    overall_satisfaction = Column(Integer, nullable=True)
+    hardest_subject_this_week = Column(String, nullable=True)
+    biggest_challenge = Column(Text, nullable=True)
+    free_feedback = Column(Text, nullable=True)
+    ai_assessment = Column(Text, nullable=True)
+    ai_raw = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", backref="weekly_checkins")
+
+
+class MockExam(Base):
+    """An AI-generated mock exam."""
+    __tablename__ = "mock_exams"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    exam_id = Column(Integer, ForeignKey("exams.id"), nullable=True)
+    title = Column(String, nullable=False)
+    duration_minutes = Column(Integer, default=60)
+    instructions = Column(Text, nullable=True)
+    submitted_at = Column(DateTime, nullable=True)
+    score_percent = Column(Float, nullable=True)
+    time_taken_minutes = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", backref="mock_exams")
+    questions = relationship("MockQuestion", back_populates="mock_exam", cascade="all, delete-orphan")
+
+
+class MockQuestion(Base):
+    """A question within a mock exam."""
+    __tablename__ = "mock_questions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    mock_exam_id = Column(Integer, ForeignKey("mock_exams.id"), nullable=False)
+    topic_id = Column(Integer, ForeignKey("exam_topics.id"), nullable=True)
+    question_number = Column(Integer, default=1)
+    question_type = Column(String, default="mcq")
+    difficulty = Column(String, default="medium")
+    subject = Column(String, nullable=True)
+    topic = Column(String, nullable=True)
+    question_text = Column(Text, nullable=False)
+    options = Column(JSON, nullable=True)
+    correct_answer = Column(String, nullable=False)
+    explanation = Column(Text, nullable=True)
+
+    student_answer = Column(String, nullable=True)
+    is_correct = Column(Boolean, nullable=True)
+    time_to_answer_seconds = Column(Integer, nullable=True)
+    fsrs_rating = Column(Integer, nullable=True)
+
+    mock_exam = relationship("MockExam", back_populates="questions")
+    exam_topic = relationship("ExamTopic", backref="mock_questions")

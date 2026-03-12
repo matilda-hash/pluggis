@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Flame, Clock, BookOpen, Target, TrendingUp } from 'lucide-react'
-import { decksApi, statsApi, examsApi } from '../services/api'
-import type { Deck, DashboardStats, Exam, TodayStats } from '../types'
+import { Flame, Clock, BookOpen, Target, TrendingUp, Brain } from 'lucide-react'
+import { decksApi, statsApi, examsApi, aiScheduleApi } from '../services/api'
+import type { Deck, DashboardStats, Exam, TodayStats, ExamReadiness } from '../types'
 import WeeklyChart from '../components/dashboard/WeeklyChart'
 import ActivityCalendar from '../components/dashboard/ActivityCalendar'
 import NewCardsChart from '../components/dashboard/NewCardsChart'
@@ -42,6 +42,74 @@ function getDynamicTitle(today: TodayStats | undefined): string {
   return 'Bra jobbat idag!'
 }
 
+// ─── Readiness widget ─────────────────────────────────────────────────────────
+
+function ReadinessRing({ score, size = 52 }: { score: number; size?: number }) {
+  const r = (size - 6) / 2
+  const circumference = 2 * Math.PI * r
+  const offset = circumference * (1 - score / 100)
+  const color = score >= 75 ? '#22c55e' : score >= 50 ? '#f59e0b' : '#ef4444'
+  return (
+    <svg width={size} height={size} className="flex-shrink-0 -rotate-90">
+      <circle cx={size / 2} cy={size / 2} r={r} strokeWidth={5} stroke="#e5e7eb" fill="none" />
+      <circle
+        cx={size / 2} cy={size / 2} r={r} strokeWidth={5} stroke={color} fill="none"
+        strokeDasharray={circumference} strokeDashoffset={offset}
+        strokeLinecap="round" style={{ transition: 'stroke-dashoffset 0.6s ease' }}
+      />
+    </svg>
+  )
+}
+
+function ReadinessDashboard({ readiness, onNavigate }: { readiness: ExamReadiness[]; onNavigate: () => void }) {
+  if (readiness.length === 0) return null
+  return (
+    <div className="card p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+          <Brain size={14} className="text-primary-500" />
+          Tentaberedskap
+        </h2>
+        <button
+          onClick={onNavigate}
+          className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+        >
+          AI-schema →
+        </button>
+      </div>
+      <div className="space-y-3">
+        {readiness.map(exam => (
+          <div key={exam.exam_id} className="flex items-center gap-3">
+            <ReadinessRing score={Math.round(exam.readiness_score)} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-800 truncate">{exam.exam_name}</span>
+                <span className="text-sm font-bold ml-2 flex-shrink-0" style={{
+                  color: exam.readiness_score >= 75 ? '#22c55e' : exam.readiness_score >= 50 ? '#f59e0b' : '#ef4444'
+                }}>
+                  {Math.round(exam.readiness_score)}%
+                </span>
+              </div>
+              <div className="text-xs text-gray-400 mt-0.5">
+                {exam.days_remaining} dagar kvar · {exam.topics.length} ämnen
+              </div>
+              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-1.5">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${exam.readiness_score}%`,
+                    backgroundColor: exam.readiness_score >= 75 ? '#22c55e' : exam.readiness_score >= 50 ? '#f59e0b' : '#ef4444'
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function RatingBar({ label, count, total, color }: {
   label: string; count: number; total: number; color: string
 }) {
@@ -63,9 +131,12 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [decks, setDecks] = useState<Deck[]>([])
   const [exams, setExams] = useState<Exam[]>([])
+  const [readiness, setReadiness] = useState<ExamReadiness[]>([])
   const [loading, setLoading] = useState(true)
 
   const loadData = useCallback(() => {
+    // Readiness is best-effort — silently ignore if AI profile not set up yet
+    aiScheduleApi.getReadiness().then(setReadiness).catch(() => {})
     return Promise.all([statsApi.dashboard(), decksApi.list(), examsApi.list()])
       .then(([s, d, e]) => {
         setStats(s)
@@ -225,6 +296,11 @@ export default function Dashboard() {
 
           {/* Exam panel */}
           <ExamPanel exams={exams} decks={decks} onExamsChange={loadData} />
+
+          {/* AI Readiness */}
+          {readiness.length > 0 && (
+            <ReadinessDashboard readiness={readiness} onNavigate={() => navigate('/ai-schedule')} />
+          )}
 
           {/* Learning history calendar */}
           <div className="card p-5">

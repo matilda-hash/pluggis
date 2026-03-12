@@ -1,5 +1,7 @@
 import axios from 'axios'
 import type {
+  AISchedule,
+  AIStudyBlock,
   AnkiStats,
   AnkiStatus,
   AppPreferences,
@@ -14,24 +16,63 @@ import type {
   Document,
   DocumentListItem,
   Exam,
+  ExamAnalyzeMessage,
+  ExamAnalyzeResponse,
   ExamCreate,
+  ExamReadiness,
+  ExamTopic,
   GeneratedCard,
   Highlight,
   HighlightPriority,
   Lecture,
   LectureCreate,
+  MockExam,
   PreLecturePayload,
   ReviewResult,
+  StudentProfile,
   StudyBlock,
   StudySession,
+  Token,
   UploadResult,
+  UserOut,
   WeaknessMetric,
+  WeeklyCheckin,
 } from '../types'
 
+const _apiBase = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api'
+
 const http = axios.create({
-  baseURL: '/api',
+  baseURL: _apiBase,
   headers: { 'Content-Type': 'application/json' },
 })
+
+// Inject JWT token into every request
+http.interceptors.request.use(config => {
+  const token = localStorage.getItem('token')
+  if (token) {
+    config.headers = config.headers ?? {}
+    config.headers['Authorization'] = `Bearer ${token}`
+  }
+  return config
+})
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+export const authApi = {
+  register: (email: string, password: string, name?: string): Promise<Token> =>
+    http.post('/auth/register', { email, password, name }).then(r => r.data),
+
+  login: (email: string, password: string): Promise<Token> => {
+    const form = new URLSearchParams()
+    form.append('username', email)
+    form.append('password', password)
+    return http.post('/auth/login', form, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    }).then(r => r.data)
+  },
+
+  me: (): Promise<UserOut> => http.get('/auth/me').then(r => r.data),
+}
 
 // ─── Decks ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +88,10 @@ export const decksApi = {
     http.put(`/decks/${id}`, data).then(r => r.data),
 
   delete: (id: number): Promise<void> => http.delete(`/decks/${id}`).then(r => r.data),
+
+  listPublic: (): Promise<Deck[]> => http.get('/decks/public').then(r => r.data),
+
+  copy: (id: number): Promise<Deck> => http.post(`/decks/${id}/copy`).then(r => r.data),
 }
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
@@ -122,6 +167,9 @@ export const examsApi = {
 
   delete: (id: number): Promise<void> =>
     http.delete(`/exams/${id}`).then(r => r.data),
+
+  analyze: (id: number, messages: ExamAnalyzeMessage[]): Promise<ExamAnalyzeResponse> =>
+    http.post(`/exams/${id}/analyze`, { messages }).then(r => r.data),
 }
 
 // ─── Anki ─────────────────────────────────────────────────────────────────────
@@ -136,10 +184,18 @@ export const ankiApi = {
   exportCards: (cardIds: number[], deckName: string): Promise<{ exported: number; errors: string[] }> =>
     http.post('/anki/export', { card_ids: cardIds, deck_name: deckName }).then(r => r.data),
 
-  importApkg: (file: File, deckId: number): Promise<{ imported: number; skipped: number; deck_name: string }> => {
+  importApkg: (
+    file: File,
+    deckId?: number,
+    newDeckName?: string,
+  ): Promise<{ imported: number; skipped: number; deck_name: string }> => {
     const form = new FormData()
     form.append('file', file)
-    form.append('deck_id', String(deckId))
+    if (newDeckName) {
+      form.append('new_deck_name', newDeckName)
+    } else if (deckId) {
+      form.append('deck_id', String(deckId))
+    }
     return http.post('/anki/import', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
@@ -188,6 +244,9 @@ export const scheduleApi = {
 
   generate: (options: { date?: string; morning_activation?: boolean; push_to_calendar?: boolean; post_work_minutes?: number }): Promise<BlockPlan> =>
     http.post('/schedule/generate', options).then(r => r.data),
+
+  generateWeek: (weekStart?: string): Promise<BlockPlan[]> =>
+    http.post('/schedule/generate-week', null, { params: weekStart ? { week_start: weekStart } : {} }).then(r => r.data),
 
   blocks: (dateFrom?: string, dateTo?: string): Promise<StudyBlock[]> =>
     http.get('/schedule/blocks', { params: { date_from: dateFrom, date_to: dateTo } }).then(r => r.data),
@@ -303,4 +362,90 @@ export const preLectureApi = {
 
   refresh: (lectureId: number): Promise<PreLecturePayload> =>
     http.post(`/pre-lecture/${lectureId}/refresh`).then(r => r.data),
+}
+
+// ─── AI Schedule ──────────────────────────────────────────────────────────────
+
+export const aiScheduleApi = {
+  // Profile / Onboarding
+  getProfile: (): Promise<StudentProfile> =>
+    http.get('/ai-schedule/profile').then(r => r.data),
+
+  saveProfile: (data: Partial<StudentProfile>): Promise<StudentProfile> =>
+    http.post('/ai-schedule/profile', data).then(r => r.data),
+
+  // Topics
+  listTopics: (examId?: number): Promise<ExamTopic[]> =>
+    http.get('/ai-schedule/topics', { params: examId ? { exam_id: examId } : {} }).then(r => r.data),
+
+  createTopic: (data: {
+    exam_id: number
+    name: string
+    subject: string
+    parent_topic_id?: number
+  }): Promise<ExamTopic> =>
+    http.post('/ai-schedule/topics', data).then(r => r.data),
+
+  bulkCreateTopics: (topics: Array<{
+    exam_id: number
+    name: string
+    subject: string
+  }>): Promise<ExamTopic[]> =>
+    http.post('/ai-schedule/topics/bulk', { topics }).then(r => r.data),
+
+  reviewTopic: (topicId: number, rating: 1 | 2 | 3 | 4): Promise<ExamTopic> =>
+    http.post(`/ai-schedule/topics/${topicId}/review`, { rating }).then(r => r.data),
+
+  deleteTopic: (topicId: number): Promise<{ ok: boolean }> =>
+    http.delete(`/ai-schedule/topics/${topicId}`).then(r => r.data),
+
+  // Daily schedule
+  getToday: (regenerate = false): Promise<AISchedule> =>
+    http.get('/ai-schedule/schedule/today', { params: { regenerate } }).then(r => r.data),
+
+  submitFeedback: (feedback: string): Promise<AISchedule> =>
+    http.post('/ai-schedule/schedule/feedback', { feedback }).then(r => r.data),
+
+  completeBlock: (blockId: number, data: {
+    completion_percentage?: number
+    self_reported_difficulty?: number
+    completion_notes?: string
+  }): Promise<AIStudyBlock> =>
+    http.post(`/ai-schedule/schedule/block/${blockId}/complete`, data).then(r => r.data),
+
+  getWeek: (weekStart?: string): Promise<AISchedule[]> =>
+    http.get('/ai-schedule/schedule/week', { params: weekStart ? { week_start: weekStart } : {} }).then(r => r.data),
+
+  // Mock exams
+  generateMockExam: (data: {
+    exam_id?: number
+    duration_minutes?: number
+    n_questions?: number
+  }): Promise<MockExam> =>
+    http.post('/ai-schedule/mock-exam/generate', data).then(r => r.data),
+
+  getMockExam: (examId: number): Promise<MockExam> =>
+    http.get(`/ai-schedule/mock-exam/${examId}`).then(r => r.data),
+
+  listMockExams: (): Promise<MockExam[]> =>
+    http.get('/ai-schedule/mock-exam').then(r => r.data),
+
+  submitMockExam: (examId: number, answers: Record<number, string>): Promise<MockExam> =>
+    http.post(`/ai-schedule/mock-exam/${examId}/submit`, { answers }).then(r => r.data),
+
+  // Weekly check-in
+  getCheckin: (): Promise<WeeklyCheckin> =>
+    http.get('/ai-schedule/checkin/weekly').then(r => r.data),
+
+  saveCheckin: (data: {
+    overall_satisfaction?: number
+    hardest_subject_this_week?: string
+    biggest_challenge?: string
+    free_feedback?: string
+  }): Promise<WeeklyCheckin> =>
+    http.post('/ai-schedule/checkin/weekly', data).then(r => r.data),
+
+  // Analytics
+  getReadiness: (): Promise<ExamReadiness[]> =>
+    http.get('/ai-schedule/analytics/readiness').then(r => r.data),
 }

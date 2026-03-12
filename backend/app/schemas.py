@@ -1,6 +1,30 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Any, Dict
 from datetime import datetime, date
+
+
+# ─── Auth ─────────────────────────────────────────────────────────────────────
+
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = None
+
+
+class UserOut(BaseModel):
+    id: int
+    email: Optional[str]
+    name: str
+    daily_goal: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 
 # ─── Card State ───────────────────────────────────────────────────────────────
@@ -67,6 +91,7 @@ class DeckUpdate(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = None
     is_active: Optional[bool] = None
+    is_public: Optional[bool] = None
 
 
 class DeckStats(BaseModel):
@@ -88,6 +113,7 @@ class DeckOut(BaseModel):
     color: str
     source_type: Optional[str]
     source_filename: Optional[str]
+    is_public: bool = False
     is_active: bool
     created_at: datetime
     stats: Optional[DeckStats] = None
@@ -174,12 +200,15 @@ class ExamCreate(BaseModel):
     name: str
     exam_date: datetime
     description: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class ExamUpdate(BaseModel):
     name: Optional[str] = None
     exam_date: Optional[datetime] = None
     description: Optional[str] = None
+    notes: Optional[str] = None
+    study_config: Optional[Dict] = None
 
 
 class ExamOut(BaseModel):
@@ -187,12 +216,25 @@ class ExamOut(BaseModel):
     name: str
     exam_date: datetime
     description: Optional[str]
+    notes: Optional[str] = None
+    study_config: Optional[Dict] = None
     created_at: datetime
     days_remaining: Optional[int] = None  # computed
     relevant_deck_ids: List[int] = []     # computed
 
     class Config:
         from_attributes = True
+
+
+class ExamAnalyzeRequest(BaseModel):
+    messages: List[Dict[str, str]]  # [{role: "user"|"assistant", content: "..."}]
+
+
+class ExamAnalyzeResponse(BaseModel):
+    done: bool
+    question: Optional[str] = None
+    options: Optional[List[str]] = None
+    strategy: Optional[Dict] = None
 
 
 # ─── Stats ────────────────────────────────────────────────────────────────────
@@ -251,6 +293,7 @@ class AnkiExportRequest(BaseModel):
 class CalendarStatus(BaseModel):
     authenticated: bool
     email: Optional[str] = None
+    needs_reauth: bool = False  # True if token lacks the full 'calendar' scope
 
 
 class CalendarAuthStart(BaseModel):
@@ -460,6 +503,7 @@ class SettingsOut(BaseModel):
     anki_available: bool
     calendar_authenticated: bool
     calendar_email: Optional[str] = None
+    redirect_uri: Optional[str] = None
 
 
 # ─── Pre-Lecture ──────────────────────────────────────────────────────────────

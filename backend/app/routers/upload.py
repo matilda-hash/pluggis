@@ -5,8 +5,9 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from ..database import get_db, DEFAULT_USER_ID
-from ..models import Card, CardState, Deck, GeneratedCardMeta
+from ..auth import get_current_user
+from ..database import get_db
+from ..models import Card, CardState, Deck, GeneratedCardMeta, User
 from ..schemas import CardsBulkCreate, UploadResult
 from ..services.card_generator import ExpandedCardGenerator
 
@@ -23,26 +24,24 @@ async def upload_pdf(
     deck_name: str = Form(None),
     num_cards: int = Form(40),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Upload a PDF, generate flashcards via Claude, return them for preview."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=422, detail="Only PDF files are supported")
 
-    # Save the uploaded file
     safe_name = f"{uuid.uuid4().hex}_{file.filename}"
     file_path = UPLOAD_DIR / safe_name
     content = await file.read()
     file_path.write_bytes(content)
 
-    # Resolve or create deck
     if deck_id:
-        deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == DEFAULT_USER_ID).first()
+        deck = db.query(Deck).filter(Deck.id == deck_id, Deck.user_id == current_user.id).first()
         if not deck:
             raise HTTPException(status_code=404, detail="Deck not found")
     else:
         name = deck_name or Path(file.filename).stem
         deck = Deck(
-            user_id=DEFAULT_USER_ID,
+            user_id=current_user.id,
             name=name,
             source_type="pdf",
             source_filename=file.filename,
@@ -51,7 +50,6 @@ async def upload_pdf(
         db.commit()
         db.refresh(deck)
 
-    # Generate flashcards with expanded 11-type generator
     try:
         generator = ExpandedCardGenerator()
         raw_cards = generator.generate_from_pdf(str(file_path), deck.name, num_cards)
@@ -60,7 +58,6 @@ async def upload_pdf(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Card generation failed: {e}")
 
-    # Return as preview (not saved yet – frontend will confirm)
     from ..schemas import GeneratedCard
 
     preview = [
@@ -88,9 +85,12 @@ async def upload_pdf(
 
 
 @router.post("/confirm")
-def confirm_cards(data: CardsBulkCreate, db: Session = Depends(get_db)):
-    """Save the approved (possibly edited) cards to the database."""
-    deck = db.query(Deck).filter(Deck.id == data.deck_id, Deck.user_id == DEFAULT_USER_ID).first()
+def confirm_cards(
+    data: CardsBulkCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    deck = db.query(Deck).filter(Deck.id == data.deck_id, Deck.user_id == current_user.id).first()
     if not deck:
         raise HTTPException(status_code=404, detail="Deck not found")
 
@@ -106,10 +106,8 @@ def confirm_cards(data: CardsBulkCreate, db: Session = Depends(get_db)):
         )
         db.add(card)
         db.flush()
-        # state=0 (New), due=None → picked up by queue's or_(due<=now, due==None) filter
-        state = CardState(card_id=card.id, user_id=DEFAULT_USER_ID, state=0)
+        state = CardState(card_id=card.id, user_id=current_user.id, state=0)
         db.add(state)
-        # Save generation metadata if tags are present
         if c.subject_tag or c.concept_tag or c.type_tag:
             meta = GeneratedCardMeta(
                 card_id=card.id,
