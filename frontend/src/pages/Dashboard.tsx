@@ -91,7 +91,7 @@ function ReadinessDashboard({ readiness, onNavigate }: { readiness: ExamReadines
                 </span>
               </div>
               <div className="text-xs text-gray-400 mt-0.5">
-                {exam.days_remaining} dagar kvar · {exam.topics.length} ämnen
+                {exam.days_remaining} dagar kvar · {(exam.topics ?? []).length} ämnen
               </div>
               <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-1.5">
                 <div
