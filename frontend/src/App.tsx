@@ -18,6 +18,7 @@ import AIOnboarding from './pages/AIOnboarding'
 import AITopics from './pages/AITopics'
 import MockExamPage from './pages/MockExamPage'
 import { Loader2 } from 'lucide-react'
+import ErrorBoundary from './components/ErrorBoundary'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -42,37 +43,39 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <Routes>
-          {/* Public auth routes */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+        <ErrorBoundary>
+          <Routes>
+            {/* Public auth routes */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
 
-          {/* Protected app routes */}
-          <Route element={
-            <ProtectedRoute>
-              <Layout />
-            </ProtectedRoute>
-          }>
-            <Route index element={<Dashboard />} />
-            <Route path="study" element={<Study />} />
-            <Route path="study/:deckId" element={<Study />} />
-            <Route path="upload" element={<Upload />} />
-            <Route path="cards/:deckId" element={<Cards />} />
-            <Route path="schedule" element={<Schedule />} />
-            <Route path="schedule/:date" element={<Schedule />} />
-            <Route path="documents" element={<Documents />} />
-            <Route path="documents/:docId" element={<DocumentViewer />} />
-            <Route path="pre-lecture/:lectureId" element={<PreLecture />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="public-decks" element={<PublicDecks />} />
-            <Route path="ai-schedule" element={<AISchedulePage />} />
-            <Route path="ai-onboarding" element={<AIOnboarding />} />
-            <Route path="ai-topics" element={<AITopics />} />
-            <Route path="mock-exam/:examId" element={<MockExamPage />} />
-          </Route>
+            {/* Protected app routes */}
+            <Route element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }>
+              <Route index element={<ErrorBoundary><Dashboard /></ErrorBoundary>} />
+              <Route path="study" element={<ErrorBoundary><Study /></ErrorBoundary>} />
+              <Route path="study/:deckId" element={<ErrorBoundary><Study /></ErrorBoundary>} />
+              <Route path="upload" element={<ErrorBoundary><Upload /></ErrorBoundary>} />
+              <Route path="cards/:deckId" element={<ErrorBoundary><Cards /></ErrorBoundary>} />
+              <Route path="schedule" element={<ErrorBoundary><Schedule /></ErrorBoundary>} />
+              <Route path="schedule/:date" element={<ErrorBoundary><Schedule /></ErrorBoundary>} />
+              <Route path="documents" element={<ErrorBoundary><Documents /></ErrorBoundary>} />
+              <Route path="documents/:docId" element={<ErrorBoundary><DocumentViewer /></ErrorBoundary>} />
+              <Route path="pre-lecture/:lectureId" element={<ErrorBoundary><PreLecture /></ErrorBoundary>} />
+              <Route path="settings" element={<ErrorBoundary><Settings /></ErrorBoundary>} />
+              <Route path="public-decks" element={<ErrorBoundary><PublicDecks /></ErrorBoundary>} />
+              <Route path="ai-schedule" element={<ErrorBoundary><AISchedulePage /></ErrorBoundary>} />
+              <Route path="ai-onboarding" element={<ErrorBoundary><AIOnboarding /></ErrorBoundary>} />
+              <Route path="ai-topics" element={<ErrorBoundary><AITopics /></ErrorBoundary>} />
+              <Route path="mock-exam/:examId" element={<ErrorBoundary><MockExamPage /></ErrorBoundary>} />
+            </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </ErrorBoundary>
       </BrowserRouter>
     </AuthProvider>
   )
