@@ -173,7 +173,7 @@ function BlockCard({ block, onComplete }: {
               <span className="font-medium">Mål:</span> {block.learning_objective}
             </div>
           )}
-          {block.resources.length > 0 && (
+          {(block.resources?.length ?? 0) > 0 && (
             <div className="text-xs text-gray-500">
               <span className="font-medium">Resurser:</span>{' '}
               {block.resources.join(' · ')}
@@ -308,7 +308,7 @@ function MockExamsPanel({ onNavigate }: { onNavigate: (id: number) => void }) {
                 <div className="text-sm font-medium text-gray-800 truncate group-hover:text-primary-700">{e.title}</div>
                 <div className="text-xs text-gray-400">
                   {new Date(e.submitted_at ?? e.created_at).toLocaleDateString('sv-SE')}
-                  {' · '}{e.questions.length} frågor
+                  {' · '}{e.questions?.length ?? 0} frågor
                   {e.time_taken_minutes && ` · ${e.time_taken_minutes} min`}
                 </div>
               </div>
