@@ -19,6 +19,7 @@ import AITopics from './pages/AITopics'
 import MockExamPage from './pages/MockExamPage'
 import { Loader2 } from 'lucide-react'
 import ErrorBoundary from './components/ErrorBoundary'
+import { ToastProvider } from './components/Toast'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -42,6 +43,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <AuthProvider>
+      <ToastProvider>
       <BrowserRouter>
         <ErrorBoundary>
           <Routes>
@@ -77,6 +79,7 @@ export default function App() {
           </Routes>
         </ErrorBoundary>
       </BrowserRouter>
+      </ToastProvider>
     </AuthProvider>
   )
 }

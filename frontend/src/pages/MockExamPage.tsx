@@ -6,17 +6,27 @@ import type { MockExam, MockQuestion } from '../types'
 
 // ─── Timer ────────────────────────────────────────────────────────────────────
 
-function useTimer(totalSeconds: number, running: boolean) {
+function useTimer(totalSeconds: number, running: boolean, onExpire?: () => void) {
   const [elapsed, setElapsed] = useState(0)
+  const expiredRef = { current: false }
   useEffect(() => {
     if (!running) return
-    const id = setInterval(() => setElapsed(e => Math.min(e + 1, totalSeconds)), 1000)
+    const id = setInterval(() => {
+      setElapsed(e => {
+        const next = Math.min(e + 1, totalSeconds)
+        if (next >= totalSeconds && !expiredRef.current) {
+          expiredRef.current = true
+          onExpire?.()
+        }
+        return next
+      })
+    }, 1000)
     return () => clearInterval(id)
-  }, [running, totalSeconds])
-  const remaining = totalSeconds - elapsed
+  }, [running, totalSeconds]) // eslint-disable-line react-hooks/exhaustive-deps
+  const remaining = Math.max(0, totalSeconds - elapsed)
   const mm = Math.floor(remaining / 60).toString().padStart(2, '0')
   const ss = (remaining % 60).toString().padStart(2, '0')
-  return { elapsed, remaining, display: `${mm}:${ss}` }
+  return { elapsed, remaining, display: `${mm}:${ss}`, expired: remaining === 0 }
 }
 
 // ─── Question view ────────────────────────────────────────────────────────────
@@ -187,7 +197,10 @@ export default function MockExamPage() {
   }, [load])
 
   const totalSeconds = exam ? exam.duration_minutes * 60 : 0
-  const timer = useTimer(totalSeconds, !submitted && !loading && !!exam)
+  const timer = useTimer(totalSeconds, !submitted && !loading && !!exam, () => {
+    // Auto-submit when time runs out
+    if (!submitted && exam) handleSubmit()
+  })
 
   const handleSubmit = async () => {
     if (!exam || submitting) return
@@ -248,14 +261,21 @@ export default function MockExamPage() {
         </div>
       </div>
 
+      {/* Time up banner */}
+      {timer.expired && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 font-medium text-center">
+          Tiden är ute — lämnar in automatiskt...
+        </div>
+      )}
+
       {/* Question */}
-      <div className="card p-6">
+      <div className={`card p-6 ${timer.expired ? 'opacity-60 pointer-events-none' : ''}`}>
         <QuestionView
           q={q}
           index={current}
           total={questions.length}
           answer={answers[q.id] ?? ''}
-          onChange={v => setAnswers(prev => ({ ...prev, [q.id]: v }))}
+          onChange={v => !timer.expired && setAnswers(prev => ({ ...prev, [q.id]: v }))}
         />
       </div>
 

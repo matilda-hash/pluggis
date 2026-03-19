@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import type { AppSettings, AppPreferences, WeaknessMetric, DaySchedule } from '../types'
 import { settingsApi, calendarApi, ankiApi, tagsApi } from '../services/api'
+import { useToast } from '../components/Toast'
 
 // ── Week schedule constants ────────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ const DAY_LABELS: Record<DayKey, string> = {
 const DEFAULT_DAY: DaySchedule = { enabled: true, max_hours: 8 }
 
 export default function Settings() {
+  const toast = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [prefs, setPrefs] = useState<AppPreferences>({
@@ -76,10 +78,18 @@ export default function Settings() {
   }
 
   async function savePrefs() {
+    // Validate study window
+    if (prefs.study_window_start >= prefs.study_window_end) {
+      toast('Starttiden måste vara före sluttiden', 'error')
+      return
+    }
     setSaving(true)
     try {
       const updated = await settingsApi.update(prefs)
       setSettings(updated)
+      toast('Inställningar sparade')
+    } catch {
+      toast('Kunde inte spara inställningar', 'error')
     } finally {
       setSaving(false)
     }

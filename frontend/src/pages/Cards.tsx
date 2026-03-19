@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Plus, Trash2, Edit2, Check, X, BookOpen } from 'lucide-react'
 import { cardsApi, decksApi } from '../services/api'
 import type { Card, Deck } from '../types'
+import { useToast } from '../components/Toast'
 
 const STATE_COLORS: Record<number, string> = {
   0: 'bg-gray-100 text-gray-500',
@@ -34,6 +35,7 @@ type EditState = { id: number; front: string; back: string; cloze_text: string }
 export default function Cards() {
   const { deckId } = useParams<{ deckId: string }>()
   const navigate = useNavigate()
+  const toast = useToast()
 
   const [deck, setDeck] = useState<Deck | null>(null)
   const [cards, setCards] = useState<Card[]>([])
@@ -58,6 +60,13 @@ export default function Cards() {
 
   const handleSaveEdit = async () => {
     if (!edit) return
+    const card = cards.find(c => c.id === edit.id)
+    if (card?.card_type === 'cloze' && !edit.cloze_text.trim()) {
+      toast('Texten kan inte vara tom', 'error'); return
+    }
+    if (card?.card_type !== 'cloze' && (!edit.front.trim() || !edit.back.trim())) {
+      toast('Framsida och baksida krävs', 'error'); return
+    }
     const updated = await cardsApi.update(edit.id, {
       front: edit.front || null,
       back: edit.back || null,
@@ -65,10 +74,17 @@ export default function Cards() {
     })
     setCards(prev => prev.map(c => c.id === updated.id ? updated : c))
     setEdit(null)
+    toast('Kort sparat')
   }
 
   const handleCreateCard = async () => {
     if (!deckId) return
+    if (newCard.type === 'cloze' && !newCard.cloze_text.trim()) {
+      toast('Texten kan inte vara tom', 'error'); return
+    }
+    if (newCard.type !== 'cloze' && (!newCard.front.trim() || !newCard.back.trim())) {
+      toast('Framsida och baksida krävs', 'error'); return
+    }
     const created = await cardsApi.create({
       deck_id: Number(deckId),
       card_type: newCard.type,
@@ -166,8 +182,22 @@ export default function Cards() {
 
       {/* Card list */}
       {cards.length === 0 ? (
-        <div className="card p-10 text-center">
-          <p className="text-gray-400 text-sm">Inga kort i den här kortleken än.</p>
+        <div className="card p-12 text-center space-y-4">
+          <div className="w-12 h-12 bg-primary-50 rounded-full flex items-center justify-center mx-auto">
+            <Plus size={22} className="text-primary-400" />
+          </div>
+          <div>
+            <p className="font-semibold text-gray-700 mb-1">Inga kort ännu</p>
+            <p className="text-gray-400 text-sm">Lägg till kort manuellt eller ladda upp en PDF för att generera kort automatiskt.</p>
+          </div>
+          <div className="flex gap-3 justify-center">
+            <button onClick={() => setShowNew(true)} className="btn-primary text-sm flex items-center gap-1.5">
+              <Plus size={14} /> Lägg till kort
+            </button>
+            <button onClick={() => navigate('/upload')} className="btn-secondary text-sm">
+              Ladda upp PDF
+            </button>
+          </div>
         </div>
       ) : (
         <div className="space-y-2">

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Flame, Clock, BookOpen, Target, TrendingUp, Brain } from 'lucide-react'
+import { Flame, Clock, BookOpen, Target, TrendingUp, Brain, Sparkles } from 'lucide-react'
 import { decksApi, statsApi, examsApi, aiScheduleApi } from '../services/api'
 import type { Deck, DashboardStats, Exam, TodayStats, ExamReadiness } from '../types'
 import WeeklyChart from '../components/dashboard/WeeklyChart'
@@ -196,6 +196,27 @@ export default function Dashboard() {
           Studera nu
         </button>
       </div>
+
+      {/* AI onboarding nudge — only if no AI profile yet */}
+      {readiness.length === 0 && decks.length > 0 && (
+        <div className="flex items-center justify-between bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl px-5 py-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <Sparkles size={16} className="text-indigo-600" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-indigo-900">Prova AI-schemat</p>
+              <p className="text-xs text-indigo-600 mt-0.5">Låt AI skapa ett personligt studieSchema baserat på dina tentor</p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/ai-onboarding')}
+            className="flex-shrink-0 ml-4 px-4 py-2 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            Kom igång →
+          </button>
+        </div>
+      )}
 
       {/* Main grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
