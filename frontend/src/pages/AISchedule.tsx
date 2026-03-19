@@ -139,14 +139,36 @@ function BlockCard({ block, onComplete }: {
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1 flex-shrink-0">
           {!isNonStudy && !block.completed && (
-            <button
-              onClick={() => setCompleting(v => !v)}
-              className="text-xs btn-primary px-2.5 py-1.5 flex items-center gap-1"
-            >
-              <Check size={11} /> Klar
-            </button>
+            <>
+              {/* Quick-complete: instant 100% done */}
+              <button
+                onClick={async () => {
+                  setSaving(true)
+                  await onComplete(block.id, 100, 3, '')
+                  setSaving(false)
+                }}
+                disabled={saving}
+                className="text-xs bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-medium transition-colors"
+                title="Snabbmarkera som klar"
+              >
+                {saving ? (
+                  <span className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Check size={11} />
+                )}
+                Klar
+              </button>
+              {/* Detailed completion form toggle */}
+              <button
+                onClick={() => setCompleting(v => !v)}
+                className="text-xs px-2 py-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                title="Detaljerad rapportering"
+              >
+                ···
+              </button>
+            </>
           )}
           {block.completed && (
             <span className="text-xs text-green-600 font-medium flex items-center gap-1">

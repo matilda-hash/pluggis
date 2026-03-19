@@ -11,6 +11,7 @@ import type {
   CalendarEvent,
   CalendarStatus,
   Card,
+  ChatMessage,
   Deck,
   DashboardStats,
   Document,
@@ -448,4 +449,60 @@ export const aiScheduleApi = {
   // Analytics
   getReadiness: (): Promise<ExamReadiness[]> =>
     http.get('/ai-schedule/analytics/readiness').then(r => r.data),
+}
+
+// ─── AI Tutor ─────────────────────────────────────────────────────────────────
+
+export const tutorApi = {
+  getHistory: (): Promise<ChatMessage[]> =>
+    http.get('/tutor/history').then(r => r.data),
+
+  clearHistory: (): Promise<{ ok: boolean }> =>
+    http.delete('/tutor/history').then(r => r.data),
+
+  /** Returns the base URL for SSE streaming (caller handles EventSource/fetch) */
+  getChatUrl: (): string => `${_apiBase}/tutor/chat`,
+
+  /** Send a message and stream the response via fetch SSE. */
+  streamChat: async (
+    message: string,
+    onChunk: (text: string) => void,
+    onDone: () => void,
+    onError: (msg: string) => void,
+  ): Promise<void> => {
+    const token = localStorage.getItem('token')
+    const res = await fetch(`${_apiBase}/tutor/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ message }),
+    })
+    if (!res.ok || !res.body) {
+      onError('Kunde inte ansluta till handledaren.')
+      return
+    }
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const payload = JSON.parse(line.slice(6))
+          if (payload.chunk) onChunk(payload.chunk)
+          if (payload.done) onDone()
+          if (payload.error) onError(payload.error)
+        } catch {
+          // malformed line — skip
+        }
+      }
+    }
+  },
 }

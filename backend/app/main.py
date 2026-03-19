@@ -12,6 +12,7 @@ from .routers import cards, decks, exams, reviews, stats, upload
 from .routers import anki, calendar, schedule, documents, pre_lecture, tags, settings as settings_router
 from .routers import auth as auth_router
 from .routers import ai_schedule as ai_schedule_router
+from .routers import tutor as tutor_router
 
 
 @asynccontextmanager
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE decks ADD COLUMN is_public BOOLEAN NOT NULL DEFAULT 0",
             "ALTER TABLE exams ADD COLUMN notes TEXT",
             "ALTER TABLE exams ADD COLUMN study_config TEXT",
+            "ALTER TABLE student_profiles ADD COLUMN tutor_concerns TEXT",
         ]:
             try:
                 conn.execute(text(stmt))
@@ -80,6 +82,9 @@ app.include_router(settings_router.router, prefix="/api")
 
 # AI Scheduling system
 app.include_router(ai_schedule_router.router, prefix="/api")
+
+# AI Tutor
+app.include_router(tutor_router.router, prefix="/api")
 
 
 @app.get("/api/health")

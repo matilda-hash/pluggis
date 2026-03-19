@@ -549,6 +549,15 @@ export interface WeaknessMetric {
   computed_at: string
 }
 
+// ─── AI Tutor ─────────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+}
+
 // ─── Pre-lecture ──────────────────────────────────────────────────────────────
 
 export interface MiniQuizQuestion {

@@ -540,3 +540,16 @@ class MockQuestion(Base):
 
     mock_exam = relationship("MockExam", back_populates="questions")
     exam_topic = relationship("ExamTopic", backref="mock_questions")
+
+
+class ChatMessage(Base):
+    """A message in the AI tutor conversation."""
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    role = Column(String, nullable=False)      # "user" | "assistant"
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", backref="chat_messages")

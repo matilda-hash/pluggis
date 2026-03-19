@@ -17,6 +17,7 @@ import AISchedulePage from './pages/AISchedule'
 import AIOnboarding from './pages/AIOnboarding'
 import AITopics from './pages/AITopics'
 import MockExamPage from './pages/MockExamPage'
+import TutorPage from './pages/Tutor'
 import { Loader2 } from 'lucide-react'
 import ErrorBoundary from './components/ErrorBoundary'
 import { ToastProvider } from './components/Toast'
@@ -82,6 +83,7 @@ export default function App() {
               <Route path="ai-onboarding" element={<RouteErrorBoundary><AIOnboarding /></RouteErrorBoundary>} />
               <Route path="ai-topics" element={<RouteErrorBoundary><AITopics /></RouteErrorBoundary>} />
               <Route path="mock-exam/:examId" element={<RouteErrorBoundary><MockExamPage /></RouteErrorBoundary>} />
+              <Route path="tutor" element={<RouteErrorBoundary><TutorPage /></RouteErrorBoundary>} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />

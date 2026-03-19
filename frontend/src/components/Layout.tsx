@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, BookOpen, Upload, Calendar, FileText, Settings2, Globe, LogOut, Brain, Menu, X } from 'lucide-react'
+import { LayoutDashboard, BookOpen, Upload, Calendar, FileText, Settings2, Globe, LogOut, Brain, Menu, X, MessageCircle } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
+import PomodoroWidget from './PomodoroWidget'
 
 const navItems = [
   { to: '/',             icon: LayoutDashboard, label: 'Översikt',      end: true  },
   { to: '/study',        icon: BookOpen,         label: 'Studera',       end: false },
   { to: '/ai-schedule',  icon: Brain,            label: 'AI-schema',     end: false },
+  { to: '/tutor',        icon: MessageCircle,    label: 'Handledare',    end: false },
   { to: '/schedule',     icon: Calendar,         label: 'Schema',        end: false },
   { to: '/upload',       icon: Upload,           label: 'Ladda upp',     end: false },
   { to: '/documents',    icon: FileText,         label: 'Dokument',      end: false },
@@ -128,6 +130,9 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+
+      {/* Floating Pomodoro timer */}
+      <PomodoroWidget />
     </div>
   )
 }
