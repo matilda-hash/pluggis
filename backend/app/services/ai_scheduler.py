@@ -408,7 +408,7 @@ Total schemalagd tid: {total_min} minuter
 Returnera det korrigerade schemat som ett JSON-objekt."""
 
     try:
-        resp = client.messages.create(
+        resp = await client.messages.create(
             model=os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6"),
             max_tokens=4000,
             system=SELF_REVIEW_PROMPT,
@@ -530,7 +530,7 @@ async def generate_daily_schedule(
     student_feedback: Optional[str] = None,
     max_retries: int = 3,
 ) -> dict:
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+    client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
     context = build_context(
         profile, exams, topics, today, available_slots,
         daily_allocation, recent_sessions, pending_anki_reviews,
@@ -561,7 +561,7 @@ Returnera EXKLUSIVT ett JSON-objekt.
 </task>"""
 
         try:
-            resp = client.messages.create(
+            resp = await client.messages.create(
                 model=os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6"),
                 max_tokens=4000,
                 system=SCHEDULER_SYSTEM_PROMPT,
