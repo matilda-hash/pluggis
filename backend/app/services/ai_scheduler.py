@@ -187,6 +187,10 @@ DESSA REGLER FÅR ALDRIG BRYTAS:
 
 6. Blocklängd: använd student's preferred_session_length_minutes.
 
+6b. KRITISKT: end_time MÅSTE alltid vara exakt start_time + duration_minutes.
+    Om start_time är 09:00 och duration_minutes är 50, MÅSTE end_time vara 09:50.
+    Kontrollera VARJE block innan du returnerar JSON. Fel här är oacceptabla.
+
 7. Interleaving: max 2 block av samma ämne i rad. Byt sedan ämne.
 
 8. Spaced repetition-reviews: topics där next_review är idag MÅSTE schemaläggas.
@@ -363,6 +367,64 @@ Anki-repetitioner förfallna idag: {pending_anki_reviews} kort
 </recent_study_history_7d>"""
 
 
+# ─── Self-review prompt ───────────────────────────────────────────────────────
+
+SELF_REVIEW_PROMPT = """Du är en kvalitetsgranskar av studiescheman. Granska detta schema och returnera en korrigerad version.
+
+KONTROLLERA OBLIGATORISKT:
+1. end_time = start_time + duration_minutes för VARJE block (räkna manuellt)
+2. Inga block överlappar i tid
+3. Totala studietimmar överstiger inte max_daily_study_hours
+4. Inga block är orimligt korta (<10 min för studieblock) eller långa (>120 min utan paus)
+5. Om ett block beskriver "3 timmar" men duration_minutes=5, fixa det
+6. Balansen: inte 5h på ett ämne och 5 min på ett annat utan bra anledning
+7. Pausblock läggs in efter långa studiepass (>90 min sammanhängande)
+8. activity_description är konsistent med duration_minutes (ett 50-min block ska inte beskrivas som "3 timmars prov")
+
+Returnera EXKLUSIVT ett korrigerat JSON-objekt med exakt samma struktur. Inga kommentarer, ingen text utanför JSON."""
+
+
+async def _self_review_schedule(client, schedule: dict, profile: dict, context: str) -> dict:
+    """Ask Claude to review and fix the generated schedule for consistency and balance."""
+    max_min = profile.get("max_daily_study_hours", 7) * 60
+    total_min = sum(b.get("duration_minutes", 0) for b in schedule.get("blocks", []))
+
+    review_prompt = f"""Granska och korrigera detta studieSchema:
+
+<student_constraints>
+Max studietid: {max_min} minuter
+Föredragen blocklängd: {profile.get('preferred_session_length_minutes', 50)} minuter
+</student_constraints>
+
+<schedule_to_review>
+{json.dumps(schedule, indent=2, ensure_ascii=False)}
+</schedule_to_review>
+
+<detected_stats>
+Antal block: {len(schedule.get('blocks', []))}
+Total schemalagd tid: {total_min} minuter
+</detected_stats>
+
+Returnera det korrigerade schemat som ett JSON-objekt."""
+
+    try:
+        resp = client.messages.create(
+            model=os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6"),
+            max_tokens=4000,
+            system=SELF_REVIEW_PROMPT,
+            messages=[{"role": "user", "content": review_prompt}],
+        )
+        reviewed = _extract_json(resp.content[0].text)
+        # Only accept if it has blocks and roughly same count
+        orig_count = len(schedule.get("blocks", []))
+        new_count = len(reviewed.get("blocks", []))
+        if new_count >= max(1, orig_count - 2):
+            return reviewed
+    except Exception:
+        pass
+    return schedule  # fallback: return original if review fails
+
+
 # ─── Main generation function ─────────────────────────────────────────────────
 
 def _extract_json(raw: str) -> dict:
@@ -378,6 +440,49 @@ def _extract_json(raw: str) -> dict:
     return json.loads(raw[start:end])
 
 
+def _time_to_minutes(t: str) -> int:
+    """'HH:MM' → total minutes since midnight."""
+    try:
+        h, m = t.split(":")
+        return int(h) * 60 + int(m)
+    except Exception:
+        return 0
+
+
+def _minutes_to_time(m: int) -> str:
+    """Total minutes since midnight → 'HH:MM'."""
+    m = max(0, min(m, 23 * 60 + 59))
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def _fix_block_times(schedule: dict) -> dict:
+    """
+    Auto-correct each block so that end_time = start_time + duration_minutes.
+    If the discrepancy is large (>5 min), trust duration_minutes and rewrite end_time.
+    Also rebuild block_number sequentially.
+    """
+    blocks = sorted(schedule.get("blocks", []), key=lambda b: b.get("start_time", "00:00"))
+    for i, block in enumerate(blocks):
+        block["block_number"] = i + 1
+        start = _time_to_minutes(block.get("start_time", "09:00"))
+        end   = _time_to_minutes(block.get("end_time",   "09:00"))
+        dur   = block.get("duration_minutes", 0)
+
+        actual_dur = end - start
+        if abs(actual_dur - dur) > 5 and dur > 0:
+            # Trust duration_minutes, fix end_time
+            block["end_time"] = _minutes_to_time(start + dur)
+        elif actual_dur > 0 and dur == 0:
+            # Trust time span, fix duration_minutes
+            block["duration_minutes"] = actual_dur
+
+        # Clamp duration to sane range (5–180 min)
+        block["duration_minutes"] = max(5, min(180, block.get("duration_minutes", 30)))
+
+    schedule["blocks"] = blocks
+    return schedule
+
+
 def _validate_schedule(schedule: dict, profile: dict) -> list[str]:
     errors = []
     max_min = profile.get("max_daily_study_hours", 7) * 60
@@ -389,6 +494,17 @@ def _validate_schedule(schedule: dict, profile: dict) -> list[str]:
     for i in range(len(blocks) - 1):
         if blocks[i].get("end_time", "") > blocks[i + 1].get("start_time", "99:99"):
             errors.append(f"Block {i + 1} och {i + 2} överlappar i tid")
+
+    # Check duration vs time span
+    for b in blocks:
+        start = _time_to_minutes(b.get("start_time", "09:00"))
+        end   = _time_to_minutes(b.get("end_time", "09:00"))
+        dur   = b.get("duration_minutes", 0)
+        if end - start > 0 and abs((end - start) - dur) > 5:
+            errors.append(
+                f"Block '{b.get('activity_title', '?')}': duration_minutes={dur} "
+                f"stämmer inte med {b.get('start_time')}–{b.get('end_time')} ({end-start} min)"
+            )
 
     consec = 1
     for i in range(1, len(blocks)):
@@ -453,9 +569,13 @@ Returnera EXKLUSIVT ett JSON-objekt.
             )
             raw = resp.content[0].text
             schedule = _extract_json(raw)
+            schedule = _fix_block_times(schedule)  # auto-correct timing inconsistencies
             last_schedule = schedule
             errors = _validate_schedule(schedule, profile)
             if not errors:
+                # Run self-review pass before returning
+                schedule = await _self_review_schedule(client, schedule, profile, context)
+                schedule = _fix_block_times(schedule)  # fix any new issues from review
                 return {"success": True, "schedule": schedule, "attempts": attempt + 1}
             last_errors = errors
         except Exception as e:
