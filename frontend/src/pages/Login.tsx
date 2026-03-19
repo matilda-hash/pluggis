@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { Stethoscope, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { authApi } from '../services/api'
 import { useAuth } from '../auth/AuthContext'
 
@@ -31,66 +31,77 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-sm space-y-6">
-        {/* Logo */}
-        <div className="text-center">
-          <div className="inline-flex items-center gap-3 mb-5">
-            <div className="bg-primary-600 text-white p-3 rounded-2xl shadow-md">
-              <Stethoscope size={36} />
-            </div>
-            <span className="font-bold text-gray-900 text-4xl tracking-tight">Doktorn</span>
-          </div>
-          <h1 className="text-xl font-semibold text-gray-800">Logga in</h1>
-          <p className="text-sm text-gray-500 mt-1">Fortsätt med ditt konto</p>
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-pink-50 via-rose-50 to-fuchsia-50 px-4">
+      {/* Decorative blobs */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -top-32 -left-32 w-96 h-96 bg-pink-200 rounded-full opacity-30 blur-3xl" />
+        <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-fuchsia-200 rounded-full opacity-30 blur-3xl" />
+      </div>
+
+      <div className="relative w-full max-w-sm space-y-8">
+        {/* Logo – big, no white box */}
+        <div className="flex justify-center">
+          <img
+            src="/pluggislogo.png"
+            alt="Pluggis"
+            className="h-40 w-auto object-contain drop-shadow-lg"
+          />
         </div>
 
-        <form onSubmit={handleSubmit} className="card p-6 space-y-4">
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-3 py-2">
-              {error}
+        {/* Card */}
+        <div className="bg-white/80 backdrop-blur-sm rounded-3xl shadow-xl border border-pink-100 p-8 space-y-5">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-gray-900">Välkommen tillbaka</h1>
+            <p className="text-sm text-gray-500 mt-1">Logga in för att fortsätta studera</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
+                {error}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">E-post</label>
+              <input
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-pink-300 focus:border-pink-300 outline-none transition-all"
+                placeholder="din@email.com"
+              />
             </div>
-          )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">E-post</label>
-            <input
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 outline-none"
-              placeholder="din@email.com"
-            />
-          </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Lösenord</label>
+              <input
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-pink-300 focus:border-pink-300 outline-none transition-all"
+                placeholder="••••••••"
+              />
+            </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Lösenord</label>
-            <input
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-300 outline-none"
-              placeholder="••••••••"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full btn-primary py-2.5 flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            {loading ? <Loader2 size={16} className="animate-spin" /> : null}
-            Logga in
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md hover:shadow-lg disabled:opacity-60"
+            >
+              {loading ? <Loader2 size={16} className="animate-spin" /> : null}
+              Logga in
+            </button>
+          </form>
+        </div>
 
         <p className="text-center text-sm text-gray-500">
           Inget konto?{' '}
-          <Link to="/register" className="text-primary-600 hover:underline font-medium">
+          <Link to="/register" className="text-pink-600 hover:text-pink-700 font-semibold hover:underline">
             Registrera dig
           </Link>
         </p>
