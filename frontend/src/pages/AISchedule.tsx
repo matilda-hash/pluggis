@@ -528,7 +528,7 @@ export default function AISchedulePage() {
 
   if (!schedule) return null
 
-  const studyBlocks = schedule.blocks.filter(b => !['lunch','break','gym'].includes(b.block_type))
+  const studyBlocks = (schedule.blocks ?? []).filter(b => !['lunch','break','gym'].includes(b.block_type))
   const doneCount = studyBlocks.filter(b => b.completed).length
   const totalStudyMin = studyBlocks.reduce((s, b) => s + b.duration_minutes, 0)
   const doneMin = studyBlocks.filter(b => b.completed).reduce((s, b) => s + b.duration_minutes, 0)
@@ -597,9 +597,9 @@ export default function AISchedulePage() {
       )}
 
       {/* Alerts */}
-      {schedule.alerts.length > 0 && (
+      {(schedule.alerts ?? []).length > 0 && (
         <div className="space-y-2">
-          {schedule.alerts.map((a, i) => <AlertBanner key={i} alert={a} />)}
+          {(schedule.alerts ?? []).map((a, i) => <AlertBanner key={i} alert={a} />)}
         </div>
       )}
 
@@ -620,7 +620,7 @@ export default function AISchedulePage() {
 
       {/* Block timeline */}
       <div className="space-y-2">
-        {schedule.blocks.map(block => (
+        {(schedule.blocks ?? []).map(block => (
           <BlockCard key={block.id} block={block} onComplete={handleComplete} />
         ))}
       </div>

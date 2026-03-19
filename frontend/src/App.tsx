@@ -40,12 +40,21 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+// Resets ErrorBoundary automatically on every route change
+function RouteErrorBoundary({ children }: { children: React.ReactNode }) {
+  const location = useLocation()
+  return (
+    <ErrorBoundary resetKey={location.pathname}>
+      {children}
+    </ErrorBoundary>
+  )
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <ToastProvider>
-      <BrowserRouter>
-        <ErrorBoundary>
+        <BrowserRouter>
           <Routes>
             {/* Public auth routes */}
             <Route path="/login" element={<Login />} />
@@ -57,28 +66,27 @@ export default function App() {
                 <Layout />
               </ProtectedRoute>
             }>
-              <Route index element={<ErrorBoundary><Dashboard /></ErrorBoundary>} />
-              <Route path="study" element={<ErrorBoundary><Study /></ErrorBoundary>} />
-              <Route path="study/:deckId" element={<ErrorBoundary><Study /></ErrorBoundary>} />
-              <Route path="upload" element={<ErrorBoundary><Upload /></ErrorBoundary>} />
-              <Route path="cards/:deckId" element={<ErrorBoundary><Cards /></ErrorBoundary>} />
-              <Route path="schedule" element={<ErrorBoundary><Schedule /></ErrorBoundary>} />
-              <Route path="schedule/:date" element={<ErrorBoundary><Schedule /></ErrorBoundary>} />
-              <Route path="documents" element={<ErrorBoundary><Documents /></ErrorBoundary>} />
-              <Route path="documents/:docId" element={<ErrorBoundary><DocumentViewer /></ErrorBoundary>} />
-              <Route path="pre-lecture/:lectureId" element={<ErrorBoundary><PreLecture /></ErrorBoundary>} />
-              <Route path="settings" element={<ErrorBoundary><Settings /></ErrorBoundary>} />
-              <Route path="public-decks" element={<ErrorBoundary><PublicDecks /></ErrorBoundary>} />
-              <Route path="ai-schedule" element={<ErrorBoundary><AISchedulePage /></ErrorBoundary>} />
-              <Route path="ai-onboarding" element={<ErrorBoundary><AIOnboarding /></ErrorBoundary>} />
-              <Route path="ai-topics" element={<ErrorBoundary><AITopics /></ErrorBoundary>} />
-              <Route path="mock-exam/:examId" element={<ErrorBoundary><MockExamPage /></ErrorBoundary>} />
+              <Route index element={<RouteErrorBoundary><Dashboard /></RouteErrorBoundary>} />
+              <Route path="study" element={<RouteErrorBoundary><Study /></RouteErrorBoundary>} />
+              <Route path="study/:deckId" element={<RouteErrorBoundary><Study /></RouteErrorBoundary>} />
+              <Route path="upload" element={<RouteErrorBoundary><Upload /></RouteErrorBoundary>} />
+              <Route path="cards/:deckId" element={<RouteErrorBoundary><Cards /></RouteErrorBoundary>} />
+              <Route path="schedule" element={<RouteErrorBoundary><Schedule /></RouteErrorBoundary>} />
+              <Route path="schedule/:date" element={<RouteErrorBoundary><Schedule /></RouteErrorBoundary>} />
+              <Route path="documents" element={<RouteErrorBoundary><Documents /></RouteErrorBoundary>} />
+              <Route path="documents/:docId" element={<RouteErrorBoundary><DocumentViewer /></RouteErrorBoundary>} />
+              <Route path="pre-lecture/:lectureId" element={<RouteErrorBoundary><PreLecture /></RouteErrorBoundary>} />
+              <Route path="settings" element={<RouteErrorBoundary><Settings /></RouteErrorBoundary>} />
+              <Route path="public-decks" element={<RouteErrorBoundary><PublicDecks /></RouteErrorBoundary>} />
+              <Route path="ai-schedule" element={<RouteErrorBoundary><AISchedulePage /></RouteErrorBoundary>} />
+              <Route path="ai-onboarding" element={<RouteErrorBoundary><AIOnboarding /></RouteErrorBoundary>} />
+              <Route path="ai-topics" element={<RouteErrorBoundary><AITopics /></RouteErrorBoundary>} />
+              <Route path="mock-exam/:examId" element={<RouteErrorBoundary><MockExamPage /></RouteErrorBoundary>} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </ErrorBoundary>
-      </BrowserRouter>
+        </BrowserRouter>
       </ToastProvider>
     </AuthProvider>
   )
