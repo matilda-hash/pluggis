@@ -405,7 +405,7 @@ export const aiScheduleApi = {
     http.get('/ai-schedule/schedule/today', { params: { regenerate } }).then(r => r.data),
 
   submitFeedback: (feedback: string): Promise<AISchedule> =>
-    http.post('/ai-schedule/schedule/feedback', { feedback }).then(r => r.data),
+    http.post('/ai-schedule/schedule/feedback', { feedback_type: 'free_text', feedback_text: feedback }).then(r => r.data),
 
   completeBlock: (blockId: number, data: {
     completion_percentage?: number

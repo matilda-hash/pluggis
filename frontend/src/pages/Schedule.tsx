@@ -129,6 +129,7 @@ export default function Schedule() {
   const [syncing, setSyncing] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [pushMsg, setPushMsg] = useState('')
+  const [generateError, setGenerateError] = useState('')
   const [showLectureForm, setShowLectureForm] = useState(false)
   const [editingLecture, setEditingLecture] = useState<Lecture | null>(null)
   const [expandedBlock, setExpandedBlock] = useState<number | null>(null)
@@ -225,12 +226,16 @@ export default function Schedule() {
 
   async function generateWeek() {
     setGenerating(true)
+    setGenerateError('')
     try {
       await scheduleApi.generateWeek(toIso(weekDays[0]))
       const start = toIso(weekDays[0])
       const end = toIso(weekDays[6])
       const newBlocks = await scheduleApi.blocks(start, end).catch(() => [])
       setRangeBlocks(Array.isArray(newBlocks) ? newBlocks : [])
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+      setGenerateError(msg || 'Något gick fel vid generering. Försök igen.')
     } finally { setGenerating(false) }
   }
 
@@ -445,15 +450,20 @@ export default function Schedule() {
       {/* ── Views ──────────────────────────────────────────────────────────── */}
       {viewMode === 'week' && (
         <>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={generateWeek}
-              disabled={generating}
-              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-primary-600 to-indigo-600 text-white rounded-xl shadow-sm hover:opacity-90 disabled:opacity-50 font-medium text-sm transition-all"
-            >
-              <RefreshCw size={15} className={generating ? 'animate-spin' : ''} />
-              {generating ? 'Genererar...' : 'Generera vecka'}
-            </button>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={generateWeek}
+                disabled={generating}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-primary-600 to-indigo-600 text-white rounded-xl shadow-sm hover:opacity-90 disabled:opacity-50 font-medium text-sm transition-all"
+              >
+                <RefreshCw size={15} className={generating ? 'animate-spin' : ''} />
+                {generating ? 'Genererar...' : 'Generera vecka'}
+              </button>
+            </div>
+            {generateError && (
+              <p className="text-xs text-red-600">{generateError}</p>
+            )}
           </div>
           <WeekTimeline
             days={weekDays}

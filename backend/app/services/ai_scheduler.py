@@ -191,6 +191,15 @@ DESSA REGLER FÅR ALDRIG BRYTAS:
     Om start_time är 09:00 och duration_minutes är 50, MÅSTE end_time vara 09:50.
     Kontrollera VARJE block innan du returnerar JSON. Fel här är oacceptabla.
 
+6c. MINIMUMTID: Inget studieblock får vara kortare än 20 minuter. Inte ens ett kort block.
+    Man hinner inte ens ta fram material på 10 minuter. 20 min är ett absolut minimum.
+    YouTube/recap/recap-block: minst 20 min. Övningsprov: minst 45 min. Fullständigt prov: minst 60 min.
+    Om du vill skapa ett block på <20 min: slå ihop det med ett angränsande block istället.
+
+6d. KONSISTENS: Om du skriver "Övningsprov" eller "practice test" i activity_title, MÅSTE duration_minutes
+    vara minst 45. Om du skriver "fullständigt prov" eller liknande, MÅSTE duration_minutes vara minst 60.
+    Det är absurt att sätta ett "60-minuters prov" mellan 13:30 och 13:40.
+
 7. Interleaving: max 2 block av samma ämne i rad. Byt sedan ämne.
 
 8. Spaced repetition-reviews: topics där next_review är idag MÅSTE schemaläggas.
@@ -375,8 +384,8 @@ KONTROLLERA OBLIGATORISKT:
 1. end_time = start_time + duration_minutes för VARJE block (räkna manuellt)
 2. Inga block överlappar i tid
 3. Totala studietimmar överstiger inte max_daily_study_hours
-4. Inga block är orimligt korta (<10 min för studieblock) eller långa (>120 min utan paus)
-5. Om ett block beskriver "3 timmar" men duration_minutes=5, fixa det
+4. Inga studieblock är kortare än 20 min. Om ett studieblock är <20 min: ta bort det eller slå ihop med nästa block. 20 min är absolut minimum — man hinner inte ens ta fram material på 10 min.
+5. Om ett block beskriver "övningsprov 60 min" men duration_minutes=10, fixa duration_minutes till 60 och justera end_time
 6. Balansen: inte 5h på ett ämne och 5 min på ett annat utan bra anledning
 7. Pausblock läggs in efter långa studiepass (>90 min sammanhängande)
 8. activity_description är konsistent med duration_minutes (ett 50-min block ska inte beskrivas som "3 timmars prov")
@@ -476,8 +485,8 @@ def _fix_block_times(schedule: dict) -> dict:
             # Trust time span, fix duration_minutes
             block["duration_minutes"] = actual_dur
 
-        # Clamp duration to sane range (5–180 min)
-        block["duration_minutes"] = max(5, min(180, block.get("duration_minutes", 30)))
+        # Clamp duration to sane range (20–180 min) — nothing under 20 min is realistic
+        block["duration_minutes"] = max(20, min(180, block.get("duration_minutes", 30)))
 
     schedule["blocks"] = blocks
     return schedule

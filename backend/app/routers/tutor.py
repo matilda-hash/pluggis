@@ -109,9 +109,9 @@ async def chat(
             db.add(assistant_msg)
             db.commit()
 
-            # Background concern extraction (non-blocking)
+            # Background concern extraction (non-blocking, uses its own DB session)
             asyncio.create_task(
-                extract_and_save_concerns(current_user, assistant_text, db)
+                extract_and_save_concerns(current_user.id, assistant_text)
             )
 
             yield f"data: {json.dumps({'done': True})}\n\n"

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 import anthropic
 
+from ..database import SessionLocal
 from ..models import (
     User, Deck, Card, CardState, Exam, ExamTopic,
     Document, ChatMessage, StudentProfile, AIStudyBlock,
@@ -166,13 +167,13 @@ async def stream_tutor_response(
 
 
 async def extract_and_save_concerns(
-    user: User,
+    user_id: int,
     assistant_response: str,
-    db: Session,
 ) -> None:
     """
     Ask Claude to extract any study concerns from the conversation and
     update the student profile's tutor_concerns field.
+    Uses its own DB session since it runs as a background task.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
@@ -196,12 +197,15 @@ Returnera en kort punktlista (max 5 punkter) på svenska med konkreta orosflaggo
         )
         concerns_text = response.content[0].text.strip()
         if concerns_text.lower() != "inga":
-            profile = db.query(StudentProfile).filter(StudentProfile.user_id == user.id).first()
-            if profile:
-                existing = getattr(profile, "tutor_concerns", "") or ""
-                # Append new concerns, keep last ~500 chars
-                combined = f"{existing}\n{concerns_text}".strip()[-500:]
-                profile.tutor_concerns = combined
-                db.commit()
+            db = SessionLocal()
+            try:
+                profile = db.query(StudentProfile).filter(StudentProfile.user_id == user_id).first()
+                if profile:
+                    existing = getattr(profile, "tutor_concerns", "") or ""
+                    combined = f"{existing}\n{concerns_text}".strip()[-500:]
+                    profile.tutor_concerns = combined
+                    db.commit()
+            finally:
+                db.close()
     except Exception:
         pass  # Don't let concern extraction crash the tutor
