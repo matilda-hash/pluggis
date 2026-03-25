@@ -2,11 +2,10 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   RefreshCw, ChevronDown, ChevronUp, Check,
-  AlertTriangle, Info, Zap, Clock, BookOpen, Brain, ListTodo, Send, MessageCircle,
+  AlertTriangle, Info, Zap, Clock, BookOpen, Brain, ListTodo, Send,
 } from 'lucide-react'
 import { aiScheduleApi } from '../services/api'
 import type { AISchedule, AIStudyBlock, ProactiveAlert, MockExam, WeeklyCheckin } from '../types'
-import TutorPage from './Tutor'
 
 // ─── Colour scheme per block_type ────────────────────────────────────────────
 
@@ -488,7 +487,6 @@ function WeeklyCheckinPanel() {
 
 export default function AISchedulePage() {
   const navigate = useNavigate()
-  const [tab, setTab] = useState<'schema' | 'handledare'>('schema')
   const [schedule, setSchedule] = useState<AISchedule | null>(null)
   const [loading, setLoading] = useState(true)
   const [regenerating, setRegenerating] = useState(false)
@@ -582,38 +580,7 @@ export default function AISchedulePage() {
   const isGeneric = studyBlocks.length > 0 && studyBlocks.every(b => b.topic === 'Generell repetition' || !b.subtopic)
 
   return (
-    <div className="max-w-2xl mx-auto">
-      {/* Tab switcher */}
-      <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 mb-5">
-        <button
-          onClick={() => setTab('schema')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all ${
-            tab === 'schema'
-              ? 'bg-white shadow-sm text-gray-900'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          <Brain size={14} />
-          Schema
-        </button>
-        <button
-          onClick={() => setTab('handledare')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all ${
-            tab === 'handledare'
-              ? 'bg-white shadow-sm text-gray-900'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          <MessageCircle size={14} />
-          Handledare
-        </button>
-      </div>
-
-      {/* Handledare tab */}
-      {tab === 'handledare' && <TutorPage embedded />}
-
-      {/* Schema tab */}
-      {tab === 'schema' && <div className="space-y-4">
+    <div className="space-y-4 max-w-2xl mx-auto">
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -748,7 +715,6 @@ export default function AISchedulePage() {
       {/* Weekly check-in */}
       <WeeklyCheckinPanel />
 
-      </div>}{/* end schema tab */}
     </div>
   )
 }

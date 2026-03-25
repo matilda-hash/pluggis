@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { BookOpen, Upload, Settings2, LogOut, Brain, Menu, X } from 'lucide-react'
+import { BookOpen, Calendar, Settings2, LogOut, Brain, Menu, X, MessageCircle, LayoutDashboard } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import PomodoroWidget from './PomodoroWidget'
 
 const navItems = [
-  { to: '/ai-schedule', icon: Brain,     label: 'Schema',         end: false },
-  { to: '/study',       icon: BookOpen,  label: 'Studera',        end: false },
-  { to: '/upload',      icon: Upload,    label: 'Ladda upp',      end: false },
-  { to: '/settings',    icon: Settings2, label: 'Inställningar',  end: false },
+  { to: '/',            icon: LayoutDashboard, label: 'Hem',           end: true  },
+  { to: '/ai-schedule', icon: Brain,           label: 'Schema',        end: false },
+  { to: '/tutor',       icon: MessageCircle,   label: 'Handledare',    end: false },
+  { to: '/study',       icon: BookOpen,        label: 'Flashcards',    end: false },
+  { to: '/schedule',    icon: Calendar,        label: 'Veckoschema',   end: false },
+  { to: '/settings',    icon: Settings2,       label: 'Inställningar', end: false },
 ]
 
 export default function Layout() {
