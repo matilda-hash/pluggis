@@ -354,6 +354,12 @@ def delete_topic(
 
 # ─── Daily Schedule ───────────────────────────────────────────────────────────
 
+class CompleteBlockRequest(BaseModel):
+    completion_percentage: int = 100
+    self_reported_difficulty: Optional[int] = None
+    completion_notes: Optional[str] = None
+
+
 class FeedbackRequest(BaseModel):
     feedback_type: str  # too_hard|too_easy|too_long|free_text|...
     feedback_text: Optional[str] = None
@@ -408,35 +414,35 @@ async def submit_feedback(
 @router.post("/schedule/block/{block_id}/complete")
 def complete_block(
     block_id: int,
-    completion_percentage: int = 100,
-    self_reported_difficulty: Optional[int] = None,
-    notes: Optional[str] = None,
+    req: CompleteBlockRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    user_id = current_user.id
     block = db.query(AIStudyBlock).filter(
-        AIStudyBlock.id == block_id, AIStudyBlock.user_id == current_user.id
+        AIStudyBlock.id == block_id, AIStudyBlock.user_id == user_id
     ).first()
     if not block:
         raise HTTPException(status_code=404, detail="Block hittades inte")
 
     block.completed = True
-    block.completion_percentage = completion_percentage
-    block.self_reported_difficulty = self_reported_difficulty
-    block.completion_notes = notes
+    block.completion_percentage = req.completion_percentage
+    block.self_reported_difficulty = req.self_reported_difficulty
+    block.completion_notes = req.completion_notes
     block.completed_at = datetime.utcnow()
 
     # Update topic total_study_minutes
-    if block.topic_id and completion_percentage > 0:
+    if block.topic_id and req.completion_percentage > 0:
         t = db.query(ExamTopic).filter(
-            ExamTopic.id == block.topic_id, ExamTopic.user_id == current_user.id
+            ExamTopic.id == block.topic_id, ExamTopic.user_id == user_id
         ).first()
         if t:
-            t.total_study_minutes += int(block.duration_minutes * completion_percentage / 100)
+            t.total_study_minutes += int(block.duration_minutes * req.completion_percentage / 100)
             t.updated_at = datetime.utcnow()
 
     db.commit()
-    return {"ok": True, "block_id": block_id}
+    db.refresh(block)
+    return _block_out(block)
 
 
 @router.get("/schedule/week")
@@ -933,13 +939,17 @@ async def _generate_and_save(
     today: date,
     student_feedback: Optional[str] = None,
 ) -> dict:
-    profile_obj = _get_or_create_profile(current_user.id, db)
+    # Extract user_id as a plain int immediately — ORM objects can become detached
+    # after a flush/commit or a long async await (Anthropic API call).
+    user_id = current_user.id
+
+    profile_obj = _get_or_create_profile(user_id, db)
     profile = _profile_to_dict(profile_obj)
 
-    exams = db.query(Exam).filter(Exam.user_id == current_user.id).all()
+    exams = db.query(Exam).filter(Exam.user_id == user_id).all()
     exam_dicts = [_exam_to_dict(e) for e in exams]
 
-    topics = db.query(ExamTopic).filter(ExamTopic.user_id == current_user.id).all()
+    topics = db.query(ExamTopic).filter(ExamTopic.user_id == user_id).all()
     topic_dicts = [_topic_to_dict(t) for t in topics]
 
     # Add exam_date and exam_weight to topics for urgency calculation
@@ -964,7 +974,7 @@ async def _generate_and_save(
     week_ago = (today - timedelta(days=7)).isoformat()
     recent_scheds = (
         db.query(AISchedule)
-        .filter(AISchedule.user_id == current_user.id, AISchedule.schedule_date >= week_ago)
+        .filter(AISchedule.user_id == user_id, AISchedule.schedule_date >= week_ago)
         .all()
     )
     recent_sessions = []
@@ -1004,7 +1014,7 @@ async def _generate_and_save(
 
     # Persist
     ai_sched = AISchedule(
-        user_id=current_user.id,
+        user_id=user_id,
         schedule_date=today.isoformat(),
         total_study_minutes=sched_data.get("total_study_minutes", 0),
         summary=sched_data.get("summary"),
@@ -1018,7 +1028,7 @@ async def _generate_and_save(
     for b_data in sched_data.get("blocks", []):
         block = AIStudyBlock(
             schedule_id=ai_sched.id,
-            user_id=current_user.id,
+            user_id=user_id,
             block_number=b_data.get("block_number", 1),
             start_time=b_data.get("start_time"),
             end_time=b_data.get("end_time"),

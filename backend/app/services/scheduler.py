@@ -25,6 +25,8 @@ LUNCH_DURATION = 90
 BREAK_PER_50_MIN = 10              # minutes
 MAX_REP_MINUTES = 120              # cap daily repetition at 2 hours
 MIN_STUDY_POMODORO = 270           # apply 50/10 method when study > 4.5 hours
+MIN_BLOCK_DURATION = 20            # never place a block in a slot shorter than this
+MIN_PRACTICE_TEST_SLOT = 45        # practice_test requires at least 45 min of free time
 COMMUTE_BEFORE_LECTURE = 45        # minutes (in-person only)
 COMMUTE_AFTER_FINAL = 40           # minutes (in-person only)
 TRAINING_BUFFER = 30               # minutes before/after training block
@@ -352,12 +354,18 @@ class DailyScheduler:
             "timed_drill", "case_study", "post_lecture", "pre_lecture", "practice_test",
         ]
 
+        _min_dur = {"practice_test": MIN_PRACTICE_TEST_SLOT}
+
         for block_type in compressible_order:
             if deficit <= 0:
                 break
             for spec in result:
                 if spec.block_type == block_type and deficit > 0:
-                    reduction = min(deficit, spec.duration_minutes // 2)
+                    floor = _min_dur.get(spec.block_type, MIN_BLOCK_DURATION)
+                    max_reduction = spec.duration_minutes - floor
+                    if max_reduction <= 0:
+                        continue
+                    reduction = min(deficit, max_reduction)
                     spec.duration_minutes -= reduction
                     spec.compression_level += 1
                     deficit -= reduction
@@ -442,6 +450,12 @@ class DailyScheduler:
 
                 slot = int((window.end - cursor).total_seconds() / 60)
                 if slot <= 0:
+                    advance()
+                    continue
+
+                # Skip this window if it's too small to start this block type
+                min_slot = MIN_PRACTICE_TEST_SLOT if spec.block_type == "practice_test" else MIN_BLOCK_DURATION
+                if slot < min_slot:
                     advance()
                     continue
 

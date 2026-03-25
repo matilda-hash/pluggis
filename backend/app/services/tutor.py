@@ -134,24 +134,27 @@ def _build_messages(history: list[ChatMessage], new_message: str) -> list[dict]:
 
 
 async def stream_tutor_response(
-    user: User,
+    user_id: int,
     user_message: str,
-    history: list[ChatMessage],
-    db: Session,
+    history: list[dict],
+    context_str: str,
+    concerns_str: str,
 ) -> AsyncIterator[str]:
-    """Yield text chunks from the tutor response."""
+    """Yield text chunks from the tutor response. Accepts pre-built context (no DB needed)."""
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         yield "Fel: ANTHROPIC_API_KEY saknas."
         return
 
-    context_str, concerns_str = _build_context(user, db)
     system_prompt = TUTOR_SYSTEM_PROMPT.format(
         context=context_str,
         concerns=concerns_str,
     )
 
-    messages = _build_messages(history, user_message)
+    messages = []
+    for msg in history:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": user_message})
 
     client = anthropic.AsyncAnthropic(api_key=api_key)
     model = os.getenv("CLAUDE_MODEL", "claude-opus-4-5")

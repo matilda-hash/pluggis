@@ -84,8 +84,19 @@ function AlertBanner({ alert }: { alert: ProactiveAlert }) {
 
 // ─── Block card ───────────────────────────────────────────────────────────────
 
-function BlockCard({ block, onComplete }: {
+function TimeGap({ label, time }: { label: string; time?: string }) {
+  return (
+    <div className="flex items-center gap-3 py-1 px-4 text-xs text-gray-400">
+      <div className="flex-1 h-px bg-gray-100" />
+      <span>{label}{time ? ` · ${time}` : ''}</span>
+      <div className="flex-1 h-px bg-gray-100" />
+    </div>
+  )
+}
+
+function BlockCard({ block, isActive, onComplete }: {
   block: AIStudyBlock
+  isActive: boolean
   onComplete: (id: number, pct: number, difficulty: number, notes: string) => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -140,7 +151,7 @@ function BlockCard({ block, onComplete }: {
 
         {/* Actions */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {!isNonStudy && !block.completed && (
+          {!isNonStudy && !block.completed && isActive && (
             <>
               {/* Quick-complete: instant 100% done */}
               <button
@@ -150,13 +161,13 @@ function BlockCard({ block, onComplete }: {
                   setSaving(false)
                 }}
                 disabled={saving}
-                className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 active:bg-green-700 text-white px-3 py-2 rounded-xl font-semibold text-sm transition-colors shadow-sm"
+                className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 active:bg-green-700 text-white px-4 py-2.5 rounded-xl font-semibold text-sm transition-colors shadow-sm"
                 title="Markera som klar"
               >
                 {saving ? (
                   <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 ) : (
-                  <Check size={14} strokeWidth={2.5} />
+                  <Check size={15} strokeWidth={2.5} />
                 )}
                 Klar
               </button>
@@ -169,6 +180,9 @@ function BlockCard({ block, onComplete }: {
                 <ChevronDown size={14} className={completing ? 'rotate-180 transition-transform' : 'transition-transform'} />
               </button>
             </>
+          )}
+          {!isNonStudy && !block.completed && !isActive && (
+            <span className="text-xs text-gray-300 px-2">kommande</span>
           )}
           {block.completed && (
             <span className="text-sm text-green-600 font-semibold flex items-center gap-1 px-1">
@@ -564,6 +578,7 @@ export default function AISchedulePage() {
 
   const studyBlocks = (schedule.blocks ?? []).filter(b => !['lunch','break','gym'].includes(b.block_type))
   const doneCount = studyBlocks.filter(b => b.completed).length
+  const activeBlockId = studyBlocks.find(b => !b.completed)?.id ?? null
   const totalStudyMin = studyBlocks.reduce((s, b) => s + b.duration_minutes, 0)
   const doneMin = studyBlocks.filter(b => b.completed).reduce((s, b) => s + b.duration_minutes, 0)
   const progressPct = totalStudyMin > 0 ? Math.round((doneMin / totalStudyMin) * 100) : 0
@@ -653,10 +668,16 @@ export default function AISchedulePage() {
       )}
 
       {/* Block timeline */}
-      <div className="flex flex-col gap-1">
-        {(schedule.blocks ?? []).map(block => (
-          <BlockCard key={block.id} block={block} onComplete={handleComplete} />
-        ))}
+      <div className="flex flex-col gap-2">
+        {(schedule.blocks ?? []).map(block => {
+          if (['lunch', 'break', 'gym'].includes(block.block_type)) {
+            const gapLabel = block.block_type === 'lunch' ? 'Lunch' : block.block_type === 'gym' ? 'Gym/Träning' : 'Paus'
+            const timeStr = block.start_time && block.end_time ? `${block.start_time}–${block.end_time}` : undefined
+            return <TimeGap key={block.id} label={gapLabel} time={timeStr} />
+          }
+          const isActive = block.id === activeBlockId
+          return <BlockCard key={block.id} block={block} isActive={isActive} onComplete={handleComplete} />
+        })}
       </div>
 
       {/* Tomorrow preview */}
