@@ -2,10 +2,11 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   RefreshCw, ChevronDown, ChevronUp, Check,
-  AlertTriangle, Info, Zap, Clock, BookOpen, Brain, ListTodo, Send,
+  AlertTriangle, Info, Zap, Clock, BookOpen, Brain, ListTodo, Send, MessageCircle,
 } from 'lucide-react'
 import { aiScheduleApi } from '../services/api'
 import type { AISchedule, AIStudyBlock, ProactiveAlert, MockExam, WeeklyCheckin } from '../types'
+import TutorPage from './Tutor'
 
 // ─── Colour scheme per block_type ────────────────────────────────────────────
 
@@ -94,9 +95,8 @@ function TimeGap({ label, time }: { label: string; time?: string }) {
   )
 }
 
-function BlockCard({ block, isActive, onComplete }: {
+function BlockCard({ block, onComplete }: {
   block: AIStudyBlock
-  isActive: boolean
   onComplete: (id: number, pct: number, difficulty: number, notes: string) => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -151,7 +151,7 @@ function BlockCard({ block, isActive, onComplete }: {
 
         {/* Actions */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {!isNonStudy && !block.completed && isActive && (
+          {!isNonStudy && !block.completed && (
             <>
               {/* Quick-complete: instant 100% done */}
               <button
@@ -180,9 +180,6 @@ function BlockCard({ block, isActive, onComplete }: {
                 <ChevronDown size={14} className={completing ? 'rotate-180 transition-transform' : 'transition-transform'} />
               </button>
             </>
-          )}
-          {!isNonStudy && !block.completed && !isActive && (
-            <span className="text-xs text-gray-300 px-2">kommande</span>
           )}
           {block.completed && (
             <span className="text-sm text-green-600 font-semibold flex items-center gap-1 px-1">
@@ -491,6 +488,7 @@ function WeeklyCheckinPanel() {
 
 export default function AISchedulePage() {
   const navigate = useNavigate()
+  const [tab, setTab] = useState<'schema' | 'handledare'>('schema')
   const [schedule, setSchedule] = useState<AISchedule | null>(null)
   const [loading, setLoading] = useState(true)
   const [regenerating, setRegenerating] = useState(false)
@@ -578,20 +576,49 @@ export default function AISchedulePage() {
 
   const studyBlocks = (schedule.blocks ?? []).filter(b => !['lunch','break','gym'].includes(b.block_type))
   const doneCount = studyBlocks.filter(b => b.completed).length
-  const activeBlockId = studyBlocks.find(b => !b.completed)?.id ?? null
   const totalStudyMin = studyBlocks.reduce((s, b) => s + b.duration_minutes, 0)
   const doneMin = studyBlocks.filter(b => b.completed).reduce((s, b) => s + b.duration_minutes, 0)
   const progressPct = totalStudyMin > 0 ? Math.round((doneMin / totalStudyMin) * 100) : 0
-  // Detect generic fallback schedule (all blocks have same subject = generic placeholder)
   const isGeneric = studyBlocks.length > 0 && studyBlocks.every(b => b.topic === 'Generell repetition' || !b.subtopic)
 
   return (
-    <div className="space-y-5 max-w-2xl mx-auto">
+    <div className="max-w-2xl mx-auto">
+      {/* Tab switcher */}
+      <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 mb-5">
+        <button
+          onClick={() => setTab('schema')}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all ${
+            tab === 'schema'
+              ? 'bg-white shadow-sm text-gray-900'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <Brain size={14} />
+          Schema
+        </button>
+        <button
+          onClick={() => setTab('handledare')}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all ${
+            tab === 'handledare'
+              ? 'bg-white shadow-sm text-gray-900'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <MessageCircle size={14} />
+          Handledare
+        </button>
+      </div>
+
+      {/* Handledare tab */}
+      {tab === 'handledare' && <TutorPage embedded />}
+
+      {/* Schema tab */}
+      {tab === 'schema' && <div className="space-y-4">
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            <Brain size={20} className="text-primary-500" />
             Dagens schema
           </h1>
           <p className="text-sm text-gray-500">
@@ -668,15 +695,14 @@ export default function AISchedulePage() {
       )}
 
       {/* Block timeline */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         {(schedule.blocks ?? []).map(block => {
           if (['lunch', 'break', 'gym'].includes(block.block_type)) {
             const gapLabel = block.block_type === 'lunch' ? 'Lunch' : block.block_type === 'gym' ? 'Gym/Träning' : 'Paus'
             const timeStr = block.start_time && block.end_time ? `${block.start_time}–${block.end_time}` : undefined
             return <TimeGap key={block.id} label={gapLabel} time={timeStr} />
           }
-          const isActive = block.id === activeBlockId
-          return <BlockCard key={block.id} block={block} isActive={isActive} onComplete={handleComplete} />
+          return <BlockCard key={block.id} block={block} onComplete={handleComplete} />
         })}
       </div>
 
@@ -722,6 +748,7 @@ export default function AISchedulePage() {
       {/* Weekly check-in */}
       <WeeklyCheckinPanel />
 
+      </div>}{/* end schema tab */}
     </div>
   )
 }

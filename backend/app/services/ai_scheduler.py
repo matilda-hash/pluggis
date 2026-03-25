@@ -468,14 +468,16 @@ def _fix_block_times(schedule: dict) -> dict:
     """
     Auto-correct each block so that end_time = start_time + duration_minutes.
     If the discrepancy is large (>5 min), trust duration_minutes and rewrite end_time.
-    Also rebuild block_number sequentially.
+    Also rebuild block_number sequentially and enforce minimum durations.
     """
+    NON_STUDY_TYPES = {"lunch", "break", "gym"}
     blocks = sorted(schedule.get("blocks", []), key=lambda b: b.get("start_time", "00:00"))
     for i, block in enumerate(blocks):
         block["block_number"] = i + 1
         start = _time_to_minutes(block.get("start_time", "09:00"))
         end   = _time_to_minutes(block.get("end_time",   "09:00"))
         dur   = block.get("duration_minutes", 0)
+        block_type = block.get("block_type", "")
 
         actual_dur = end - start
         if abs(actual_dur - dur) > 5 and dur > 0:
@@ -485,8 +487,22 @@ def _fix_block_times(schedule: dict) -> dict:
             # Trust time span, fix duration_minutes
             block["duration_minutes"] = actual_dur
 
-        # Clamp duration to sane range (20–180 min) — nothing under 20 min is realistic
-        block["duration_minutes"] = max(20, min(180, block.get("duration_minutes", 30)))
+        if block_type not in NON_STUDY_TYPES:
+            # Enforce minimum durations
+            min_dur = 20
+            if block_type == "practice_test":
+                min_dur = 45
+            elif block_type in ("timed_drill", "case_study", "active_recall"):
+                min_dur = 25
+
+            if block.get("duration_minutes", 0) < min_dur:
+                block["duration_minutes"] = min_dur
+                block["end_time"] = _minutes_to_time(start + min_dur)
+
+        # Clamp to sane upper bound
+        if block.get("duration_minutes", 0) > 180:
+            block["duration_minutes"] = 180
+            block["end_time"] = _minutes_to_time(start + 180)
 
     schedule["blocks"] = blocks
     return schedule

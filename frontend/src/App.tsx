@@ -83,7 +83,7 @@ export default function App() {
               <Route path="ai-onboarding" element={<RouteErrorBoundary><AIOnboarding /></RouteErrorBoundary>} />
               <Route path="ai-topics" element={<RouteErrorBoundary><AITopics /></RouteErrorBoundary>} />
               <Route path="mock-exam/:examId" element={<RouteErrorBoundary><MockExamPage /></RouteErrorBoundary>} />
-              <Route path="tutor" element={<RouteErrorBoundary><TutorPage /></RouteErrorBoundary>} />
+              <Route path="tutor" element={<Navigate to="/ai-schedule" replace />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />

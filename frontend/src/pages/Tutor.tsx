@@ -33,7 +33,7 @@ const SUGGESTIONS = [
   'Koppla ihop inflammation och patofysiologi för mig',
 ]
 
-export default function TutorPage() {
+export default function TutorPage({ embedded = false }: { embedded?: boolean }) {
   const [history, setHistory] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -126,8 +126,10 @@ export default function TutorPage() {
 
   const isEmpty = history.length === 0 && !streaming
 
+  const heightClass = embedded ? 'h-[calc(100vh-11rem)]' : 'h-[calc(100vh-4rem)]'
+
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] max-w-3xl mx-auto">
+    <div className={`flex flex-col ${heightClass} max-w-3xl mx-auto`}>
       {/* Header */}
       <div className="flex items-center justify-between pb-3 border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center gap-2">
