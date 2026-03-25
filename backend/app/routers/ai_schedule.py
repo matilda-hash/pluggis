@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
-from ..database import get_db
+from ..database import SessionLocal, get_db
 from ..models import (
     AISchedule, AIStudyBlock, Exam, ExamTopic,
     MockExam, MockQuestion, StudentProfile, User, WeeklyCheckin,
@@ -994,6 +994,7 @@ async def _generate_and_save(
     # Proactive checks
     proactive = run_proactive_checks(profile, exam_dicts, topic_dicts, recent_sessions, today)
 
+    # ── Phase 2: Call AI (long async operation — original session may expire) ───
     result = await generate_daily_schedule(
         profile=profile,
         exams=exam_dicts,
@@ -1007,49 +1008,51 @@ async def _generate_and_save(
     )
 
     sched_data = result.get("schedule", {})
-
-    # Inject proactive suggestions into AI result
     existing_suggestions = sched_data.get("proactive_suggestions", [])
     sched_data["proactive_suggestions"] = proactive + existing_suggestions
 
-    # Persist
-    ai_sched = AISchedule(
-        user_id=user_id,
-        schedule_date=today.isoformat(),
-        total_study_minutes=sched_data.get("total_study_minutes", 0),
-        summary=sched_data.get("summary"),
-        tomorrow_preview=sched_data.get("tomorrow_preview"),
-        ai_raw=sched_data,
-        generation_attempts=result.get("attempts", 1),
-    )
-    db.add(ai_sched)
-    db.flush()
-
-    for b_data in sched_data.get("blocks", []):
-        block = AIStudyBlock(
-            schedule_id=ai_sched.id,
+    # ── Phase 3: Persist using a fresh session (original may have been released) ─
+    write_db = SessionLocal()
+    try:
+        ai_sched = AISchedule(
             user_id=user_id,
-            block_number=b_data.get("block_number", 1),
-            start_time=b_data.get("start_time"),
-            end_time=b_data.get("end_time"),
-            duration_minutes=b_data.get("duration_minutes", 50),
-            subject=b_data.get("subject"),
-            topic=b_data.get("topic"),
-            subtopic=b_data.get("subtopic"),
-            block_type=b_data.get("block_type", "active_recall"),
-            study_technique=b_data.get("study_technique"),
-            activity_title=b_data.get("activity_title"),
-            activity_description=b_data.get("activity_description"),
-            resources=b_data.get("resources", []),
-            learning_objective=b_data.get("learning_objective"),
-            is_spaced_repetition=b_data.get("is_spaced_repetition", False),
-            location=b_data.get("location", "home"),
-            requires_screen=b_data.get("requires_screen", True),
-            difficulty=b_data.get("difficulty", 3),
-            break_after_minutes=b_data.get("break_after_minutes", 10),
+            schedule_date=today.isoformat(),
+            total_study_minutes=sched_data.get("total_study_minutes", 0),
+            summary=sched_data.get("summary"),
+            tomorrow_preview=sched_data.get("tomorrow_preview"),
+            ai_raw=sched_data,
+            generation_attempts=result.get("attempts", 1),
         )
-        db.add(block)
+        write_db.add(ai_sched)
+        write_db.flush()
 
-    db.commit()
-    db.refresh(ai_sched)
-    return _schedule_out(ai_sched)
+        for b_data in sched_data.get("blocks", []):
+            block = AIStudyBlock(
+                schedule_id=ai_sched.id,
+                user_id=user_id,
+                block_number=b_data.get("block_number", 1),
+                start_time=b_data.get("start_time"),
+                end_time=b_data.get("end_time"),
+                duration_minutes=b_data.get("duration_minutes", 50),
+                subject=b_data.get("subject"),
+                topic=b_data.get("topic"),
+                subtopic=b_data.get("subtopic"),
+                block_type=b_data.get("block_type", "active_recall"),
+                study_technique=b_data.get("study_technique"),
+                activity_title=b_data.get("activity_title"),
+                activity_description=b_data.get("activity_description"),
+                resources=b_data.get("resources", []),
+                learning_objective=b_data.get("learning_objective"),
+                is_spaced_repetition=b_data.get("is_spaced_repetition", False),
+                location=b_data.get("location", "home"),
+                requires_screen=b_data.get("requires_screen", True),
+                difficulty=b_data.get("difficulty", 3),
+                break_after_minutes=b_data.get("break_after_minutes", 10),
+            )
+            write_db.add(block)
+
+        write_db.commit()
+        write_db.refresh(ai_sched)
+        return _schedule_out(ai_sched)
+    finally:
+        write_db.close()
